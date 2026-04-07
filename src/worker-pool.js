@@ -1,34 +1,70 @@
 /**
- * WorkerPool manages a fixed-size pool of persistent child processes.
- * Each child loads the model once and reuses it across many batches.
+ * WorkerPool manages a fixed-size pool of persistent workers.
+ * Each worker loads the model once and reuses it across many batches.
  *
- * Workers run as isolated OS processes (via ChildProcessWorker / fork) so a
- * crash in any worker rejects only that worker's in-flight task; the pool and
- * the calling program continue unaffected.
+ * Two execution modes are supported:
+ *   'process' (default) — each worker is an isolated OS child process
+ *      (fork). A crash rejects only the in-flight task; the pool and the
+ *      calling program continue unaffected.
+ *   'thread' — each worker is a worker_threads thread in the same process.
+ *      Lower memory overhead and startup time, but a thread crash can
+ *      propagate to the parent. Use for trusted environments.
+ *
+ * Concurrency 1 produces sequential (single-worker) execution.
  */
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { ChildProcessWorker } from './child-process-worker.js';
+import { ThreadWorker } from './thread-worker.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORKER_PATH = join(__dirname, 'worker.js');
+const PROCESS_WORKER_PATH = join(__dirname, 'worker.js');
+const THREAD_WORKER_PATH  = join(__dirname, 'thread-worker-script.js');
 
 export class WorkerPool {
   /**
    * @param {string}   modelName  Hugging Face model identifier
    * @param {object} [options]
-   * @param {number}   [options.poolSize=2]     Number of parallel workers
-   * @param {string}   [options.pooling='mean'] Pooling strategy ('mean'|'cls'|'none')
-   * @param {boolean}  [options.normalize=true] Whether to L2-normalise embeddings
-   * @param {Function} [options._WorkerClass]   Override worker class (for testing)
+   * @param {number}   [options.poolSize=2]         Number of parallel workers
+   * @param {string}   [options.mode='process']     'process' (isolated) or 'thread' (same process)
+   * @param {string}   [options.pooling='mean']     Pooling strategy ('mean'|'cls'|'none')
+   * @param {boolean}  [options.normalize=true]     Whether to L2-normalise embeddings
+   * @param {string}   [options.token]              Hugging Face API token (overrides HF_TOKEN env var)
+   * @param {string}   [options.dtype]              Quantization dtype ('fp32'|'fp16'|'q8'|'q4'|'q4f16'|'auto')
+   * @param {string}   [options.cacheDir]           Custom model cache directory
+   * @param {Function} [options._WorkerClass]       Override worker class (for testing)
    */
-  constructor(modelName, { poolSize = 2, pooling = 'mean', normalize = true, _WorkerClass } = {}) {
+  constructor(modelName, {
+    poolSize = 2,
+    mode = 'process',
+    pooling = 'mean',
+    normalize = true,
+    token,
+    dtype,
+    cacheDir,
+    _WorkerClass,
+  } = {}) {
     this.modelName = modelName;
     this.poolSize = poolSize;
+    this.mode = mode;
     this.pooling = pooling;
     this.normalize = normalize;
-    this._WorkerClass = _WorkerClass ?? ChildProcessWorker;
+    this.token = token;
+    this.dtype = dtype;
+    this.cacheDir = cacheDir;
+
+    // Pick defaults based on mode; can be overridden for testing.
+    if (_WorkerClass) {
+      this._WorkerClass = _WorkerClass;
+      this._workerScript = PROCESS_WORKER_PATH; // doesn't matter for tests
+    } else if (mode === 'thread') {
+      this._WorkerClass = ThreadWorker;
+      this._workerScript = THREAD_WORKER_PATH;
+    } else {
+      this._WorkerClass = ChildProcessWorker;
+      this._workerScript = PROCESS_WORKER_PATH;
+    }
 
     /** @type {Array} all workers (active + idle) */
     this.workers = [];
@@ -104,11 +140,14 @@ export class WorkerPool {
       resolveReady = resolve;
     });
 
-    const worker = new this._WorkerClass(WORKER_PATH, {
+    const worker = new this._WorkerClass(this._workerScript, {
       workerData: {
         modelName: this.modelName,
         pooling: this.pooling,
         normalize: this.normalize,
+        token: this.token,
+        dtype: this.dtype,
+        cacheDir: this.cacheDir,
       },
     });
 
@@ -185,3 +224,4 @@ export class WorkerPool {
     this.idleWorkers = this.idleWorkers.filter((w) => w !== worker);
   }
 }
+
