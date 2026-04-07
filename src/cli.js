@@ -33,7 +33,7 @@ Usage:
 Options:
   -m, --model <name>      Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
   -b, --batch-size <n>    Texts per worker batch (default: 32)
-  -c, --concurrency <n>   Parallel worker threads (default: 2)
+  -c, --concurrency <n>   Parallel worker processes (default: 2)
   -p, --pooling <mode>    Pooling strategy: mean|cls|none (default: mean)
       --no-normalize      Disable L2 normalisation
   -h, --help              Show this help

@@ -85,7 +85,7 @@ export class Embedder {
   }
 
   /**
-   * Shut down all worker threads and free resources.
+   * Shut down all worker processes and free resources.
    * The Embedder instance must not be used after this call.
    */
   async destroy() {

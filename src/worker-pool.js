@@ -1,40 +1,49 @@
 /**
- * WorkerPool manages a fixed-size pool of persistent worker threads.
- * Each worker loads the model once and reuses it across many batches,
- * avoiding repeated model-download overhead.
+ * WorkerPool manages a fixed-size pool of persistent child processes.
+ * Each child loads the model once and reuses it across many batches.
+ *
+ * Workers run as isolated OS processes (via ChildProcessWorker / fork) so a
+ * crash in any worker rejects only that worker's in-flight task; the pool and
+ * the calling program continue unaffected.
  */
 
-import { Worker } from 'worker_threads';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { ChildProcessWorker } from './child-process-worker.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = join(__dirname, 'worker.js');
 
 export class WorkerPool {
   /**
-   * @param {string} modelName  Hugging Face model identifier
+   * @param {string}   modelName  Hugging Face model identifier
    * @param {object} [options]
    * @param {number}   [options.poolSize=2]     Number of parallel workers
    * @param {string}   [options.pooling='mean'] Pooling strategy ('mean'|'cls'|'none')
    * @param {boolean}  [options.normalize=true] Whether to L2-normalise embeddings
-   * @param {Function} [options._WorkerClass]   Override Worker class (for testing)
+   * @param {Function} [options._WorkerClass]   Override worker class (for testing)
    */
   constructor(modelName, { poolSize = 2, pooling = 'mean', normalize = true, _WorkerClass } = {}) {
     this.modelName = modelName;
     this.poolSize = poolSize;
     this.pooling = pooling;
     this.normalize = normalize;
-    this._WorkerClass = _WorkerClass ?? Worker;
+    this._WorkerClass = _WorkerClass ?? ChildProcessWorker;
 
-    /** @type {Worker[]} */
+    /** @type {Array} all workers (active + idle) */
     this.workers = [];
-    /** @type {Worker[]} idle workers ready to accept tasks */
+    /** @type {Array} idle workers ready to accept tasks */
     this.idleWorkers = [];
     /** @type {Array<{id:number, texts:string[]}>} queued tasks waiting for a free worker */
     this.pendingTasks = [];
     /** @type {Map<number, {resolve:Function, reject:Function}>} */
     this.taskCallbacks = new Map();
+    /**
+     * Maps each worker to the task ID it is currently processing.
+     * Used to reject the right task when a worker crashes.
+     * @type {Map<object, number>}
+     */
+    this._workerToTaskId = new Map();
     this._nextId = 0;
     this._initialized = false;
   }
@@ -83,6 +92,7 @@ export class WorkerPool {
     this.idleWorkers = [];
     this.pendingTasks = [];
     this.taskCallbacks.clear();
+    this._workerToTaskId.clear();
     this._initialized = false;
   }
 
@@ -110,6 +120,7 @@ export class WorkerPool {
       } else if (type === 'result') {
         const cb = this.taskCallbacks.get(id);
         this.taskCallbacks.delete(id);
+        this._workerToTaskId.delete(worker);
         this.idleWorkers.push(worker);
         cb.resolve(embeddings);
         this._dispatch();
@@ -117,6 +128,7 @@ export class WorkerPool {
         const cb = this.taskCallbacks.get(id);
         if (cb) {
           this.taskCallbacks.delete(id);
+          this._workerToTaskId.delete(worker);
           cb.reject(new Error(error));
         }
         this.idleWorkers.push(worker);
@@ -125,10 +137,32 @@ export class WorkerPool {
     });
 
     worker.on('error', (err) => {
-      // Surface the error to all pending tasks on this worker.
-      for (const [id, cb] of this.taskCallbacks) {
-        cb.reject(err);
-        this.taskCallbacks.delete(id);
+      // OS-level error (e.g. failed to spawn). Reject the in-flight task.
+      const taskId = this._workerToTaskId.get(worker);
+      if (taskId !== undefined) {
+        const cb = this.taskCallbacks.get(taskId);
+        if (cb) {
+          this.taskCallbacks.delete(taskId);
+          cb.reject(err);
+        }
+        this._workerToTaskId.delete(worker);
+      }
+      this._removeWorker(worker);
+    });
+
+    // Crash isolation: a non-zero exit rejects only this worker's task.
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        const taskId = this._workerToTaskId.get(worker);
+        if (taskId !== undefined) {
+          const cb = this.taskCallbacks.get(taskId);
+          if (cb) {
+            this.taskCallbacks.delete(taskId);
+            cb.reject(new Error(`Worker process exited unexpectedly (code ${code})`));
+          }
+          this._workerToTaskId.delete(worker);
+        }
+        this._removeWorker(worker);
       }
     });
 
@@ -140,7 +174,14 @@ export class WorkerPool {
     while (this.pendingTasks.length > 0 && this.idleWorkers.length > 0) {
       const task = this.pendingTasks.shift();
       const worker = this.idleWorkers.shift();
-      worker.postMessage({ id: task.id, texts: task.texts });
+      this._workerToTaskId.set(worker, task.id);
+      worker.postMessage({ type: 'task', id: task.id, texts: task.texts });
     }
+  }
+
+  /** Remove a worker from both the active and idle lists. */
+  _removeWorker(worker) {
+    this.workers = this.workers.filter((w) => w !== worker);
+    this.idleWorkers = this.idleWorkers.filter((w) => w !== worker);
   }
 }

@@ -29,16 +29,19 @@ class FakeWorker extends EventEmitter {
     setImmediate(() => this.emit('message', { type: 'ready' }));
   }
 
-  postMessage({ id, texts }) {
+  postMessage({ type, id, texts }) {
     if (this._terminated) return;
-    setImmediate(() => {
-      const embeddings = texts.map(() => [0.1, 0.2, 0.3]);
-      this.emit('message', { type: 'result', id, embeddings });
-    });
+    if (type === 'task') {
+      setImmediate(() => {
+        const embeddings = texts.map(() => [0.1, 0.2, 0.3]);
+        this.emit('message', { type: 'result', id, embeddings });
+      });
+    }
   }
 
   async terminate() {
     this._terminated = true;
+    setImmediate(() => this.emit('exit', 0));
   }
 }
 
@@ -113,10 +116,12 @@ describe('WorkerPool', async () => {
         super();
         setImmediate(() => this.emit('message', { type: 'ready' }));
       }
-      postMessage({ id }) {
-        setImmediate(() =>
-          this.emit('message', { type: 'error', id, error: 'kaboom' }),
-        );
+      postMessage({ type, id }) {
+        if (type === 'task') {
+          setImmediate(() =>
+            this.emit('message', { type: 'error', id, error: 'kaboom' }),
+          );
+        }
       }
       async terminate() {}
     }
@@ -124,6 +129,48 @@ describe('WorkerPool', async () => {
     const pool = new WorkerPool('test-model', { _WorkerClass: ErrorWorker, poolSize: 1 });
     await pool.initialize();
     await assert.rejects(() => pool.run(['text']), { message: 'kaboom' });
+    await pool.destroy();
+  });
+
+  test('a crashing worker rejects only its task; the pool keeps running', async () => {
+    // CrashWorker: completes the first task normally, crashes on the second.
+    let taskCount = 0;
+    class CrashWorker extends EventEmitter {
+      constructor() {
+        super();
+        setImmediate(() => this.emit('message', { type: 'ready' }));
+      }
+      postMessage({ type, id, texts }) {
+        if (type !== 'task') return;
+        taskCount++;
+        if (taskCount === 1) {
+          // First task succeeds
+          setImmediate(() =>
+            this.emit('message', { type: 'result', id, embeddings: texts.map(() => [1]) }),
+          );
+        } else {
+          // Second task: worker crashes
+          setImmediate(() => this.emit('exit', 1));
+        }
+      }
+      async terminate() { this.emit('exit', 0); }
+    }
+
+    const pool = new WorkerPool('test-model', { _WorkerClass: CrashWorker, poolSize: 1 });
+    await pool.initialize();
+
+    // First task should succeed
+    const first = await pool.run(['hello']);
+    assert.deepEqual(first, [[1]]);
+
+    // Second task triggers the worker crash — must reject, not crash the process
+    await assert.rejects(
+      () => pool.run(['world']),
+      /Worker process exited unexpectedly/,
+    );
+
+    // Pool is still usable (no exception thrown, process still alive)
+    assert.equal(pool._initialized, true);
     await pool.destroy();
   });
 });

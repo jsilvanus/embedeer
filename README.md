@@ -1,7 +1,7 @@
 # embedeer
 
 A Node.js tool for generating text embeddings using models from [Hugging Face](https://huggingface.co/models).  
-Supports **batched** input and **parallel** processing via worker threads.
+Supports **batched** input and **parallel** processing via isolated worker processes.
 
 ---
 
@@ -9,7 +9,7 @@ Supports **batched** input and **parallel** processing via worker threads.
 
 - Downloads any Hugging Face feature-extraction model on first use (cached locally)
 - Splits large input arrays into configurable batches
-- Runs batches in parallel across multiple worker threads
+- Runs batches in parallel across multiple isolated worker processes
 - Simple async API and a CLI
 
 ---
@@ -30,7 +30,7 @@ import { Embedder } from 'embedeer';
 // Create an embedder backed by 2 parallel workers (default)
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   batchSize: 32,   // texts per worker task  (default: 32)
-  concurrency: 2,  // parallel worker threads (default: 2)
+  concurrency: 2,  // parallel worker processes (default: 2)
   pooling: 'mean', // 'mean' | 'cls' | 'none' (default: 'mean')
   normalize: true, // L2-normalise vectors    (default: true)
 });
@@ -39,7 +39,7 @@ const texts = ['Hello world', 'Foo bar baz', 'Another sentence'];
 const vectors = await embedder.embed(texts);
 // vectors → number[][]  (one 384-dim vector per text for all-MiniLM-L6-v2)
 
-await embedder.destroy(); // shut down workers
+await embedder.destroy(); // shut down worker processes
 ```
 
 You can also construct and initialise separately:
@@ -64,7 +64,7 @@ echo '["text1","text2"]' | npx embedeer [options]
 Options:
   -m, --model <name>      Hugging Face model  (default: Xenova/all-MiniLM-L6-v2)
   -b, --batch-size <n>    Texts per batch     (default: 32)
-  -c, --concurrency <n>   Parallel workers    (default: 2)
+  -c, --concurrency <n>   Parallel worker processes (default: 2)
   -p, --pooling <mode>    mean | cls | none   (default: mean)
       --no-normalize      Disable L2 normalisation
   -h, --help              Show help
@@ -88,13 +88,15 @@ embed(texts)
   │
   └─ Promise.all(batches) ──► WorkerPool
                                  │
-                                 ├─ Worker 0: pipeline('feature-extraction', model) → batch A
-                                 ├─ Worker 1: pipeline('feature-extraction', model) → batch B
+                                 ├─ Process 0: pipeline('feature-extraction', model) → batch A
+                                 ├─ Process 1: pipeline('feature-extraction', model) → batch B
                                  └─ ...
 ```
 
-Each worker loads the model **once** and processes many batches, avoiding
-repeated model-download overhead.
+Each worker process loads the model **once** and processes many batches, avoiding
+repeated model-download overhead.  Running as separate OS processes means a crash
+in one worker does not affect the calling program — the pool rejects only that
+worker's in-flight task and the rest continue normally.
 
 ---
 
