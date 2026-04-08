@@ -40,11 +40,48 @@ which ships as a transitive dependency. No additional packages are required.
 ```bash
 # Ubuntu / Debian
 sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
+## Programmatic API
 ```
 
 ---
 
-## Programmatic API
+## Model management
+
+Embedeer supports pre-caching and managing downloaded models.
+
+- Pull (pre-cache) a model via the CLI:
+
+```bash
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
+```
+
+- Programmatic pre-cache using `loadModel()`:
+
+```js
+import { loadModel } from '@jsilvanus/embedeer';
+
+const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
+  token: 'hf_...',    // optional HF token
+  dtype: 'q8',        // optional quantization
+  cacheDir: '/my/cache', // optional override
+});
+```
+
+- Cache location: default is `~/.embedeer/models`. Override with the CLI `--cache-dir` option or the `cacheDir` argument to `loadModel()`.
+
+- Removing cached models: delete the model directory from the cache. Example:
+
+```bash
+# Unix
+rm -rf ~/.embedeer/models/Xenova-all-MiniLM-L6-v2
+
+# PowerShell (Windows)
+Remove-Item -Recurse -Force $env:USERPROFILE\.embedeer\models\Xenova-all-MiniLM-L6-v2
+```
+
+- Advanced: see `src/model-management.js` for low-level cache helpers.
+
+## Input Sources
 
 ### Embed texts (CPU — default)
 
@@ -397,6 +434,25 @@ GPU support is built into `onnxruntime-node` (a dependency of `@huggingface/tran
 | Windows x64    | DirectML  | Any DirectX 12 GPU (most GPUs since 2016), Windows 10+ |
 
 ### Provider selection logic
+
+---
+
+## Testing
+
+Run the project's tests locally:
+
+```bash
+# install deps
+pnpm install
+
+# run tests
+pnpm test
+
+# run tests with coverage
+pnpm run coverage
+```
+
+CI is enabled via GitHub Actions (`.github/workflows/ci.yml`) which runs tests and collects coverage on push and pull requests.
 
 | `device` | `provider` | Behavior |
 |----------|-----------|----------|
