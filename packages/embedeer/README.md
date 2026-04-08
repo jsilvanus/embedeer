@@ -107,25 +107,152 @@ Embed texts:
   npx @jsilvanus/embedeer --model <name> --data '["text1","text2"]'
   npx @jsilvanus/embedeer --model <name> --file texts.txt
   echo '["t1","t2"]' | npx @jsilvanus/embedeer --model <name>
+  printf 'a\0b\0c' | npx @jsilvanus/embedeer --model <name> --delimiter '\0'
 
 Options:
-  -m, --model <name>        Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
-  -d, --data <text...>      Text(s) or JSON array to embed
-      --file <path>         Input file: JSON array or one text per line
-      --dump <path>         Write output to file instead of stdout
-      --output json|txt|sql Output format (default: json)
-  -b, --batch-size <n>      Texts per worker batch (default: 32)
-  -c, --concurrency <n>     Parallel workers (default: 2)
-      --mode process|thread Worker mode (default: process)
-  -p, --pooling <mode>      mean|cls|none (default: mean)
-      --no-normalize        Disable L2 normalisation
-      --dtype <type>        Quantization: fp32|fp16|q8|q4|q4f16|auto
-      --token <tok>         Hugging Face API token (or set HF_TOKEN env)
-      --cache-dir <path>    Model cache directory (default: ~/.embedeer/models)
-      --device <mode>       Compute device: auto|cpu|gpu (default: cpu)
-      --provider <name>     Execution provider override: cpu|cuda|dml
-  -h, --help                Show this help
+  -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
+  -d, --data <text...>         Text(s) or JSON array to embed
+      --file <path>            Input file: JSON array or delimited texts
+  -D, --delimiter <str>        Record separator for stdin/file (default: \n)
+                               Escape sequences supported: \0 \n \t \r
+      --dump <path>            Write output to file instead of stdout
+      --output <format>        Output: json|jsonl|csv|txt|sql (default: json)
+      --with-text              Include source text alongside each embedding
+  -b, --batch-size <n>         Texts per worker batch (default: 32)
+  -c, --concurrency <n>        Parallel workers (default: 2)
+      --mode process|thread    Worker mode (default: process)
+  -p, --pooling <mode>         mean|cls|none (default: mean)
+      --no-normalize           Disable L2 normalisation
+      --dtype <type>           Quantization: fp32|fp16|q8|q4|q4f16|auto
+      --token <tok>            Hugging Face API token (or set HF_TOKEN env)
+      --cache-dir <path>       Model cache directory (default: ~/.embedeer/models)
+      --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
+      --provider <name>        Execution provider override: cpu|cuda|dml
+  -h, --help                   Show this help
 ```
+
+---
+
+## Input Sources
+
+Texts can be provided in any of these ways (checked in order):
+
+| Source | How |
+|--------|-----|
+| Inline args | `--data "text1" "text2" "text3"` |
+| Inline JSON | `--data '["text1","text2"]'` |
+| File | `--file texts.txt` (JSON array or one record per line) |
+| Stdin | Pipe or redirect — auto-detected; TTY is skipped |
+
+**Stdin auto-detection:** when `stdin` is not a TTY (i.e. data is piped or redirected), embedeer reads it before deciding what to do. JSON arrays are accepted directly; otherwise records are split on the delimiter.
+
+### Configurable delimiter (`-D` / `--delimiter`)
+
+By default records in stdin and files are split on newline (`\n`). Use `--delimiter` to change it:
+
+```bash
+# Newline-delimited (default)
+printf 'Hello\nWorld\n' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
+
+# Null-byte delimited — safe with filenames/texts that contain newlines
+printf 'Hello\0World\0' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '\0'
+
+# Tab-delimited
+printf 'Hello\tWorld' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '\t'
+
+# Custom multi-character delimiter
+printf 'Hello|||World|||Foo' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '|||'
+
+# File with null-byte delimiter
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --file records.bin --delimiter '\0'
+
+# Integrate with find -print0 (handles filenames with spaces / newlines)
+find ./docs -name '*.txt' -print0 | \
+  xargs -0 cat | \
+  npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '\0'
+```
+
+Supported escape sequences in `--delimiter`:
+
+| Sequence | Character |
+|----------|-----------|
+| `\0` | Null byte (U+0000) |
+| `\n` | Newline (U+000A) |
+| `\t` | Tab (U+0009) |
+| `\r` | Carriage return (U+000D) |
+
+---
+
+## Output Formats
+
+| Format | Description |
+|--------|-------------|
+| `json` (default) | JSON array of float arrays: `[[0.1,0.2,...],[...]]` |
+| `json --with-text` | JSON array of objects: `[{"text":"...","embedding":[...]}]` |
+| `jsonl` | Newline-delimited JSON, one object per line: `{"text":"...","embedding":[...]}` |
+| `csv` | CSV with header: `text,dim_0,dim_1,...,dim_N` |
+| `txt` | Space-separated floats, one vector per line |
+| `txt --with-text` | Tab-separated: `<original text>\t<float float ...>` |
+| `sql` | `INSERT INTO embeddings (text, vector) VALUES ...;` |
+
+Use `--dump <path>` to write the output to a file instead of stdout. Progress messages always go to stderr so they never interfere with piped output.
+
+### Piping examples
+
+```bash
+MODEL=Xenova/all-MiniLM-L6-v2
+
+# --- json (default) ---
+# Embed and pretty-print with jq
+echo '["Hello","World"]' | npx @jsilvanus/embedeer --model $MODEL | jq '.[0] | length'
+
+# --- jsonl ---
+# One object per line — pipe to jq, grep, awk, etc.
+npx @jsilvanus/embedeer --model $MODEL --data "foo" "bar" --output jsonl
+
+# Filter by similarity: extract embedding for downstream processing
+npx @jsilvanus/embedeer --model $MODEL --data "query text" --output jsonl \
+  | jq -c '.embedding'
+
+# Stream a large file and store as JSONL
+npx @jsilvanus/embedeer --model $MODEL --file big.txt --output jsonl --dump out.jsonl
+
+# --- json --with-text ---
+# Keep the source text next to each vector (useful for building a search index)
+npx @jsilvanus/embedeer --model $MODEL --output json --with-text \
+  --data "cat" "dog" "fish" \
+  | jq '.[] | {text, dims: (.embedding | length)}'
+
+# --- csv ---
+# Embed then open in Python/pandas
+npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output csv --dump vectors.csv
+python3 -c "import pandas as pd; df = pd.read_csv('vectors.csv'); print(df.shape)"
+
+# --- txt ---
+# Raw floats — useful for awk/paste/numpy text loading
+npx @jsilvanus/embedeer --model $MODEL --data "Hello" "World" --output txt \
+  | awk '{print NF, "dimensions"}'
+
+# txt --with-text: original text + tab + floats, easy to parse
+npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output txt --with-text \
+  | while IFS=$'\t' read -r text vec; do echo "TEXT: $text"; done
+
+# --- sql ---
+# Generate INSERT statements for a vector DB or SQLite
+npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output sql --dump inserts.sql
+sqlite3 mydb.sqlite < inserts.sql
+
+# --- Chaining with other tools ---
+# Embed stdin from another command
+cat docs/*.txt | npx @jsilvanus/embedeer --model $MODEL --output jsonl > embeddings.jsonl
+
+# Null-byte input from find (handles any filename or text with newlines)
+find ./corpus -name '*.txt' -print0 \
+  | xargs -0 cat \
+  | npx @jsilvanus/embedeer --model $MODEL --delimiter '\0' --output jsonl
+```
+
+---
 
 ### CLI Examples
 

@@ -10,24 +10,28 @@
  *   embedeer --model <name> --data '["text1","text2"]'
  *   embedeer --model <name> --file texts.txt
  *   echo '["t1","t2"]' | embedeer --model <name>
+ *   printf 'a\0b\0c' | embedeer --model <name> --delimiter '\0'
  *
  * Options:
- *   -m, --model <name>        Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
- *   -d, --data <text...>      Text(s) to embed (JSON array or individual strings)
- *       --file <path>         File of texts (JSON array or one text per line)
- *       --dump <path>         Write output to file instead of stdout
- *       --output json|txt|sql Output format (default: json)
- *   -b, --batch-size <n>      Texts per worker batch (default: 32)
- *   -c, --concurrency <n>     Parallel worker processes/threads (default: 2)
- *       --mode process|thread Worker mode: isolated processes or in-process threads (default: process)
- *   -p, --pooling <mode>      Pooling: mean|cls|none (default: mean)
- *       --no-normalize        Disable L2 normalisation
- *       --dtype <type>        Quantization: fp32|fp16|q8|q4|q4f16|auto
- *       --token <tok>         Hugging Face API token (overrides HF_TOKEN env var)
- *       --cache-dir <path>    Custom model cache directory (default: ~/.embedeer/models)
- *       --device <mode>       Compute device: auto|cpu|gpu (default: cpu)
- *       --provider <name>     Execution provider override: cpu|cuda|dml
- *   -h, --help                Show this help
+ *   -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
+ *   -d, --data <text...>         Text(s) to embed (JSON array or individual strings)
+ *       --file <path>            File of texts (JSON array or one text per line)
+ *   -D, --delimiter <str>        Record separator for stdin/file input (default: \n)
+ *                                Escape sequences: \0 (null byte), \n, \t, \r
+ *       --dump <path>            Write output to file instead of stdout
+ *       --output <format>        Output format: json|jsonl|csv|txt|sql (default: json)
+ *       --with-text              Include source text in json/txt output
+ *   -b, --batch-size <n>         Texts per worker batch (default: 32)
+ *   -c, --concurrency <n>        Parallel worker processes/threads (default: 2)
+ *       --mode process|thread    Worker mode (default: process)
+ *   -p, --pooling <mode>         Pooling: mean|cls|none (default: mean)
+ *       --no-normalize           Disable L2 normalisation
+ *       --dtype <type>           Quantization: fp32|fp16|q8|q4|q4f16|auto
+ *       --token <tok>            Hugging Face API token (overrides HF_TOKEN env var)
+ *       --cache-dir <path>       Custom model cache directory (default: ~/.embedeer/models)
+ *       --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
+ *       --provider <name>        Execution provider override: cpu|cuda|dml
+ *   -h, --help                   Show this help
  */
 
 import { Embedder } from './embedder.js';
@@ -49,24 +53,28 @@ Embedding:
   embedeer --model <name> [--data "text1" "text2" ...]
   embedeer --model <name> --file texts.txt
   echo '["t1","t2"]' | embedeer --model <name>
+  printf 'a\\0b\\0c' | embedeer --model <name> --delimiter '\\0'
 
 Options:
-  -m, --model <name>        Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
-  -d, --data <text...>      Text(s) or JSON array to embed
-      --file <path>         Input file: JSON array or one text per line
-      --dump <path>         Write output to file instead of stdout
-      --output json|txt|sql Output format (default: json)
-  -b, --batch-size <n>      Texts per worker batch (default: 32)
-  -c, --concurrency <n>     Parallel workers (default: 2)
-      --mode process|thread Worker mode (default: process)
-  -p, --pooling <mode>      mean|cls|none (default: mean)
-      --no-normalize        Disable L2 normalisation
-      --dtype <type>        Quantization: fp32|fp16|q8|q4|q4f16|auto
-      --token <tok>         Hugging Face API token
-      --cache-dir <path>    Model cache directory (default: ${DEFAULT_CACHE_DIR})
-      --device <mode>       Compute device: auto|cpu|gpu (default: cpu)
-      --provider <name>     Execution provider override: cpu|cuda|dml
-  -h, --help                Show this help
+  -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
+  -d, --data <text...>         Text(s) or JSON array to embed
+      --file <path>            Input file: JSON array or delimited texts
+  -D, --delimiter <str>        Record separator for stdin/file (default: \\n)
+                               Escape sequences supported: \\0 \\n \\t \\r
+      --dump <path>            Write output to file instead of stdout
+      --output <format>        Output: json|jsonl|csv|txt|sql (default: json)
+      --with-text              Include source text alongside each embedding
+  -b, --batch-size <n>         Texts per worker batch (default: 32)
+  -c, --concurrency <n>        Parallel workers (default: 2)
+      --mode process|thread    Worker mode (default: process)
+  -p, --pooling <mode>         mean|cls|none (default: mean)
+      --no-normalize           Disable L2 normalisation
+      --dtype <type>           Quantization: fp32|fp16|q8|q4|q4f16|auto
+      --token <tok>            Hugging Face API token
+      --cache-dir <path>       Model cache directory (default: ${DEFAULT_CACHE_DIR})
+      --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
+      --provider <name>        Execution provider override: cpu|cuda|dml
+  -h, --help                   Show this help
 `.trim());
 }
 
@@ -74,16 +82,18 @@ Options:
 // --data so that negative numbers or hyphen-prefixed strings work correctly.
 const KNOWN_FLAGS = new Set([
   '--help', '-h', '--model', '-m', '--data', '-d', '--file', '--dump',
-  '--output', '--batch-size', '-b', '--concurrency', '-c', '--mode',
-  '--pooling', '-p', '--no-normalize', '--dtype', '--token', '--cache-dir',
-  '--device', '--provider',
+  '--output', '--with-text', '--batch-size', '-b', '--concurrency', '-c',
+  '--mode', '--pooling', '-p', '--no-normalize', '--dtype', '--token',
+  '--cache-dir', '--device', '--provider', '--delimiter', '-D',
 ]);
 const options = {
   model: 'Xenova/all-MiniLM-L6-v2',
   data: null,       // --data texts (array)
   file: null,       // --file path
+  delimiter: '\n',  // --delimiter record separator for stdin/file
   dump: null,       // --dump path
-  output: 'json',   // json | txt | sql
+  output: 'json',   // json | jsonl | csv | txt | sql
+  withText: false,  // --with-text: include source text in output
   batchSize: 32,
   concurrency: 2,
   mode: 'process',
@@ -114,10 +124,14 @@ for (let i = 0; i < args.length; i++) {
     }
   } else if (arg === '--file') {
     options.file = args[++i];
+  } else if (arg === '--delimiter' || arg === '-D') {
+    options.delimiter = parseDelimiter(args[++i]);
   } else if (arg === '--dump') {
     options.dump = args[++i];
   } else if (arg === '--output') {
     options.output = args[++i];
+  } else if (arg === '--with-text') {
+    options.withText = true;
   } else if (arg === '--batch-size' || arg === '-b') {
     options.batchSize = parseInt(args[++i], 10);
   } else if (arg === '--concurrency' || arg === '-c') {
@@ -145,9 +159,28 @@ for (let i = 0; i < args.length; i++) {
 
 // ── Output formatting ───────────────────────────────────────────────────────
 
-function formatOutput(texts, embeddings, format) {
+function formatOutput(texts, embeddings, format, withText) {
   switch (format) {
+    case 'jsonl':
+      return texts
+        .map((text, i) => JSON.stringify({ text, embedding: embeddings[i] }))
+        .join('\n');
+
+    case 'csv': {
+      if (embeddings.length === 0) return '';
+      const dims = embeddings[0].length;
+      const header = ['text', ...Array.from({ length: dims }, (_, k) => `dim_${k}`)].join(',');
+      const rows = texts.map((text, i) => {
+        const safeText = '"' + text.replace(/"/g, '""') + '"';
+        return [safeText, ...embeddings[i]].join(',');
+      });
+      return [header, ...rows].join('\n');
+    }
+
     case 'txt':
+      if (withText) {
+        return texts.map((text, i) => `${text}\t${embeddings[i].join(' ')}`).join('\n');
+      }
       return embeddings.map((vec) => vec.join(' ')).join('\n');
 
     case 'sql': {
@@ -164,6 +197,11 @@ function formatOutput(texts, embeddings, format) {
     }
 
     default: // json
+      if (withText) {
+        return JSON.stringify(
+          texts.map((text, i) => ({ text, embedding: embeddings[i] }))
+        );
+      }
       return JSON.stringify(embeddings);
   }
 }
@@ -179,13 +217,29 @@ function writeOutput(content, dumpPath) {
 
 // ── Input reading ───────────────────────────────────────────────────────────
 
-function parseTexts(raw) {
+/**
+ * Convert a user-supplied delimiter string, resolving common escape sequences.
+ * Supports: \0 (null byte), \n (newline), \t (tab), \r (carriage return).
+ */
+export function parseDelimiter(str) {
+  return str
+    .replace(/\\0/g, '\0')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\r/g, '\r');
+}
+
+/**
+ * Parse a block of text into an array of strings.
+ * First tries to parse as a JSON array; if that fails, splits on `delimiter`.
+ */
+export function parseTexts(raw, delimiter = '\n') {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
     return parsed;
   } catch {
-    return raw.split('\n').filter(Boolean);
+    return raw.split(delimiter).filter(Boolean);
   }
 }
 
@@ -223,7 +277,7 @@ async function main() {
       return;
     }
     // Stdin provided — treat as text input.
-    const texts = parseTexts(stdinRaw);
+    const texts = parseTexts(stdinRaw, options.delimiter);
     return runEmbedding(texts, resolvedCacheDir);
   }
 
@@ -232,7 +286,7 @@ async function main() {
 
   if (options.file) {
     const raw = readFileSync(options.file, 'utf8').trim();
-    texts = parseTexts(raw);
+    texts = parseTexts(raw, options.delimiter);
   } else if (options.data && options.data.length > 0) {
     // --data may be a JSON array in a single arg or multiple plain strings
     if (options.data.length === 1) {
@@ -268,7 +322,7 @@ async function runEmbedding(texts, cacheDir) {
 
   try {
     const embeddings = await embedder.embed(texts);
-    const content = formatOutput(texts, embeddings, options.output);
+    const content = formatOutput(texts, embeddings, options.output, options.withText);
     writeOutput(content, options.dump);
   } finally {
     await embedder.destroy();

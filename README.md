@@ -181,6 +181,42 @@ npx @jsilvanus/embedeer --provider dml   # explicit DirectML (Windows)
 
 ---
 
+## Input & Output
+
+Full reference: [`packages/embedeer/README.md`](packages/embedeer/README.md#input-sources)
+
+### Quick piping examples
+
+```bash
+MODEL=Xenova/all-MiniLM-L6-v2
+
+# Pipe any text — newline-delimited by default
+printf 'Hello\nWorld\n' | npx @jsilvanus/embedeer --model $MODEL
+
+# JSON array on stdin
+echo '["cat","dog","fish"]' | npx @jsilvanus/embedeer --model $MODEL
+
+# Null-byte delimiter (safe with text containing newlines)
+printf 'Hello\0World\0' | npx @jsilvanus/embedeer --model $MODEL --delimiter '\0'
+
+# JSONL output — one {"text":...,"embedding":[...]} per line, great for jq / grep
+npx @jsilvanus/embedeer --model $MODEL --output jsonl --data "foo" "bar"
+
+# Include source text in JSON output
+npx @jsilvanus/embedeer --model $MODEL --output json --with-text --data "foo" "bar"
+
+# CSV output for pandas / Excel
+npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output csv --dump vectors.csv
+
+# SQL INSERT statements
+npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output sql --dump inserts.sql
+
+# Tab-separated floats (txt), with original text prepended
+npx @jsilvanus/embedeer --model $MODEL --output txt --with-text --data "hello" "world"
+```
+
+---
+
 ## Provider Selection Logic
 
 | Platform | `device='auto'` or `device='gpu'` order |
