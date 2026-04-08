@@ -39,8 +39,8 @@ async function withPlatform(platform, arch, fn) {
 
 describe('PROVIDER_PACKAGES', () => {
   test('contains entries for all supported platform+provider combinations', () => {
-    assert.equal(PROVIDER_PACKAGES['linux-x64-cuda'],  '@jsilvanus/ort-linux-x64-cuda');
-    assert.equal(PROVIDER_PACKAGES['win32-x64-dml'],   '@jsilvanus/ort-win32-x64-dml');
+    assert.equal(PROVIDER_PACKAGES['linux-x64-cuda'],  '@jsilvanus/embedeer-ort-linux-x64-cuda');
+    assert.equal(PROVIDER_PACKAGES['win32-x64-dml'],   '@jsilvanus/embedeer-ort-win32-x64-dml');
   });
 });
 
@@ -78,7 +78,7 @@ describe('tryLoadProvider()', () => {
   });
 
   test('returns { loaded: false } when provider package is not installed or binary is missing', async () => {
-    // In the workspace, @jsilvanus/ort-linux-x64-cuda is linked but the native
+    // In the workspace, @jsilvanus/embedeer-ort-linux-x64-cuda is linked but the native
     // binary does not exist (install.js was not run), so activate() throws.
     // tryLoadProvider must return { loaded: false } in either case.
     await withPlatform('linux', 'x64', async () => {
@@ -114,7 +114,7 @@ describe('resolveProvider()', () => {
 
   test('device=auto returns undefined (CPU fallback) when GPU provider fails to activate', async () => {
     await withPlatform('linux', 'x64', async () => {
-      // @jsilvanus/ort-linux-x64-cuda is linked in the workspace but binary is
+      // @jsilvanus/embedeer-ort-linux-x64-cuda is linked in the workspace but binary is
       // missing. device='auto' must silently fall back to CPU (return undefined).
       const result = await resolveProvider('auto', undefined);
       assert.equal(result, undefined);
@@ -139,7 +139,7 @@ describe('resolveProvider()', () => {
         () => resolveProvider('gpu', undefined),
         (err) => {
           assert.ok(
-            err.message.includes('@jsilvanus/ort-linux-x64-cuda'),
+            err.message.includes('@jsilvanus/embedeer-ort-linux-x64-cuda'),
             `Expected package name in error, got: ${err.message}`,
           );
           return true;
@@ -167,14 +167,14 @@ describe('resolveProvider()', () => {
 
   test('explicit provider=cuda re-throws activate error when CUDA libraries are missing', async () => {
     await withPlatform('linux', 'x64', async () => {
-      // In this environment @jsilvanus/ort-linux-x64-cuda is installed (workspace link)
+      // In this environment @jsilvanus/embedeer-ort-linux-x64-cuda is installed (workspace link)
       // but there is no NVIDIA GPU. activate() throws the GPU-not-found error which
       // is re-thrown by resolveProvider so the user gets a clear diagnostic.
       await assert.rejects(
         () => resolveProvider('cpu', 'cuda'),
         (err) => {
           assert.ok(
-            err.message.includes('@jsilvanus/ort-linux-x64-cuda'),
+            err.message.includes('@jsilvanus/embedeer-ort-linux-x64-cuda'),
             `Expected package name in error, got: ${err.message}`,
           );
           // The error is the activate() diagnostic, not a generic "not installed" msg

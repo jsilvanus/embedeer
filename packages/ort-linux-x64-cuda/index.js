@@ -1,5 +1,5 @@
 /**
- * @jsilvanus/ort-linux-x64-cuda
+ * @jsilvanus/embedeer-ort-linux-x64-cuda
  *
  * CUDA execution provider for embedeer on Linux x64.
  *
@@ -110,7 +110,7 @@ export async function activate() {
   // 1. Check for NVIDIA GPU / driver
   if (!existsSync('/dev/nvidiactl')) {
     throw new Error(
-      '@jsilvanus/ort-linux-x64-cuda: No NVIDIA GPU detected (/dev/nvidiactl not found).\n' +
+      '@jsilvanus/embedeer-ort-linux-x64-cuda: No NVIDIA GPU detected (/dev/nvidiactl not found).\n' +
       'Ensure NVIDIA drivers are installed.\n' +
       'Verify with: nvidia-smi',
     );
@@ -121,7 +121,7 @@ export async function activate() {
 
   if (missing.length > 0) {
     throw new Error(
-      `@jsilvanus/ort-linux-x64-cuda: Missing CUDA system libraries: ${missing.join(', ')}\n\n` +
+      `@jsilvanus/embedeer-ort-linux-x64-cuda: Missing CUDA system libraries: ${missing.join(', ')}\n\n` +
       'onnxruntime-node CUDA requires CUDA 12 + cuDNN 9. Install them:\n\n' +
       '  # Option A — CUDA 12 + cuDNN 9 via apt (Ubuntu/Debian)\n' +
       '  sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12\n\n' +

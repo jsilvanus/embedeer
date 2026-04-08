@@ -1,4 +1,4 @@
-# @jsilvanus/ort-linux-x64-cuda
+# @jsilvanus/embedeer-ort-linux-x64-cuda
 
 CUDA execution provider for [embedeer](https://github.com/jsilvanus/embedeer) on **Linux x64**.
 
@@ -52,7 +52,7 @@ nvcc --version     # confirm CUDA toolkit is installed
 npm install @jsilvanus/embedeer
 
 # Step 2 — CUDA provider
-npm install @jsilvanus/ort-linux-x64-cuda
+npm install @jsilvanus/embedeer-ort-linux-x64-cuda
 ```
 
 ## Docker
@@ -80,7 +80,7 @@ RUN apt-get update && apt-get install -y curl && \
 # Install embedeer + CUDA provider
 COPY package.json ./
 RUN npm install @jsilvanus/embedeer && \
-    npm install @jsilvanus/ort-linux-x64-cuda
+    npm install @jsilvanus/embedeer-ort-linux-x64-cuda
 
 COPY . .
 ```
@@ -90,7 +90,7 @@ COPY . .
 ```bash
 docker build -t my-embedeer-app .
 docker run --rm --gpus all my-embedeer-app \
-  npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+  npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 ```
 
 **docker-compose:**
@@ -107,7 +107,7 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      npx embedeer --model Xenova/all-MiniLM-L6-v2
+      npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
                    --device gpu
                    --data "Hello GPU"
 ```
@@ -132,10 +132,10 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { provider: 'c
 
 ```bash
 # CLI — auto GPU
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello GPU"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello GPU"
 
 # CLI — explicit CUDA
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
 ```
 
 ## Error messages
@@ -143,7 +143,7 @@ npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
 If CUDA libraries are missing, you'll see:
 
 ```
-@jsilvanus/ort-linux-x64-cuda: Missing CUDA system libraries: libcudart.so.12, libcudnn.so.9
+@jsilvanus/embedeer-ort-linux-x64-cuda: Missing CUDA system libraries: libcudart.so.12, libcudnn.so.9
 
 onnxruntime-node CUDA requires CUDA 12 + cuDNN 9. Install them:
 

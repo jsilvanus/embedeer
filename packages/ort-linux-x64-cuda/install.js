@@ -1,5 +1,5 @@
 /**
- * Install / post-install check for @jsilvanus/ort-linux-x64-cuda
+ * Install / post-install check for @jsilvanus/embedeer-ort-linux-x64-cuda
  *
  * onnxruntime-node v1.20+ ships libonnxruntime_providers_cuda.so on Linux x64.
  * (@huggingface/transformers@4.x requires onnxruntime-node@1.24.x which ships CUDA.)
@@ -19,12 +19,12 @@ import { existsSync } from 'fs';
 
 if (process.platform !== 'linux' || process.arch !== 'x64') {
   console.warn(
-    `[embedeer] @jsilvanus/ort-linux-x64-cuda: skipping checks on ${process.platform}/${process.arch} (this package is for Linux x64 only)`,
+    `[embedeer] @jsilvanus/embedeer-ort-linux-x64-cuda: skipping checks on ${process.platform}/${process.arch} (this package is for Linux x64 only)`,
   );
   process.exit(0);
 }
 
-console.log('[embedeer] @jsilvanus/ort-linux-x64-cuda: checking system CUDA requirements...');
+console.log('[embedeer] @jsilvanus/embedeer-ort-linux-x64-cuda: checking system CUDA requirements...');
 
 const REQUIRED_LIBS = [
   'libcudart.so.12',
@@ -68,7 +68,7 @@ const hasGpu = existsSync('/dev/nvidiactl');
 if (!hasGpu) {
   console.warn(
     '\n[embedeer] WARNING: No NVIDIA GPU detected (/dev/nvidiactl not found).\n' +
-    '  @jsilvanus/ort-linux-x64-cuda requires an NVIDIA GPU with CUDA 12 drivers.\n' +
+    '  @jsilvanus/embedeer-ort-linux-x64-cuda requires an NVIDIA GPU with CUDA 12 drivers.\n' +
     '  GPU acceleration will not be available until drivers are installed.\n',
   );
 } else {
@@ -100,6 +100,6 @@ if (missing.length > 0) {
 }
 
 console.log(
-  '\n[embedeer] @jsilvanus/ort-linux-x64-cuda: all CUDA requirements satisfied.\n' +
+  '\n[embedeer] @jsilvanus/embedeer-ort-linux-x64-cuda: all CUDA requirements satisfied.\n' +
   '  GPU acceleration is available. Use device="gpu" or device="auto" in embedeer.\n',
 );

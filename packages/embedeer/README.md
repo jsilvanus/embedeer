@@ -26,13 +26,10 @@ Supports **batched** input, **parallel** execution, isolated **child-process** w
 npm install @jsilvanus/embedeer
 
 # GPU — Linux x64 + NVIDIA CUDA
-npm install @jsilvanus/ort-linux-x64-cuda
-
-# GPU — Windows x64 + NVIDIA CUDA
-npm install @jsilvanus/ort-win32-x64-cuda
+npm install @jsilvanus/embedeer-ort-linux-x64-cuda
 
 # GPU — Windows x64 + DirectML (any GPU: NVIDIA / AMD / Intel)
-npm install @jsilvanus/ort-win32-x64-dml
+npm install @jsilvanus/embedeer-ort-win32-x64-dml
 ```
 
 ---
@@ -100,16 +97,16 @@ const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
 ## CLI
 
 ```
-npx embedeer [options]
+npx @jsilvanus/embedeer [options]
 
 Model management (pull / cache model):
-  npx embedeer --model <name>
+  npx @jsilvanus/embedeer --model <name>
 
 Embed texts:
-  npx embedeer --model <name> --data "text1" "text2" ...
-  npx embedeer --model <name> --data '["text1","text2"]'
-  npx embedeer --model <name> --file texts.txt
-  echo '["t1","t2"]' | npx embedeer --model <name>
+  npx @jsilvanus/embedeer --model <name> --data "text1" "text2" ...
+  npx @jsilvanus/embedeer --model <name> --data '["text1","text2"]'
+  npx @jsilvanus/embedeer --model <name> --file texts.txt
+  echo '["t1","t2"]' | npx @jsilvanus/embedeer --model <name>
 
 Options:
   -m, --model <name>        Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
@@ -134,31 +131,70 @@ Options:
 
 ```bash
 # Pull a model (like ollama pull)
-npx embedeer --model Xenova/all-MiniLM-L6-v2
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
 
 # Embed a few strings, output JSON (CPU)
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello" "World"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello" "World"
 
 # Auto-detect GPU, fall back to CPU if unavailable
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello GPU"
+# (uses CUDA on Linux, DirectML on Windows, CPU everywhere else)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
 
-# Require GPU (error if no provider installed)
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+# Require GPU (throws with install instructions if no provider found)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 
-# Use CUDA explicitly (requires @jsilvanus/ort-linux-x64-cuda or ort-win32-x64-cuda)
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
+# Explicit CUDA (Linux — requires @jsilvanus/embedeer-ort-linux-x64-cuda)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
 
-# Use DirectML on Windows (requires @jsilvanus/ort-win32-x64-dml)
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
+# Explicit DirectML (Windows — requires @jsilvanus/embedeer-ort-win32-x64-dml)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
 
 # Embed from a file, dump SQL to disk
-npx embedeer --model Xenova/all-MiniLM-L6-v2 \
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 \
   --file texts.txt --output sql --dump out.sql
 
 # Use quantized model, in-process threads, private model with token
-npx embedeer --model my-org/private-model \
+npx @jsilvanus/embedeer --model my-org/private-model \
   --token hf_xxx --dtype q8 --mode thread \
   --data "embed me"
+```
+
+---
+
+### Using GPU with npx
+
+Install the provider package for your platform, then pass `--device auto` to use the GPU
+wherever available, with silent CPU fallback.
+
+**Linux x64 — NVIDIA CUDA:**
+
+```bash
+# One-time: install CUDA 12 system libraries (Ubuntu/Debian)
+sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
+
+# Install both packages
+npm install @jsilvanus/embedeer
+npm install @jsilvanus/embedeer-ort-linux-x64-cuda
+
+# Auto-detect: uses CUDA here, CPU fallback on any other machine
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
+
+# Hard-require CUDA (error + install hint if unavailable):
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+
+# Explicit CUDA provider:
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
+```
+
+**Windows x64 — DirectML (any GPU: NVIDIA / AMD / Intel):**
+
+```bash
+npm install @jsilvanus/embedeer
+npm install @jsilvanus/embedeer-ort-win32-x64-dml
+
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu  --data "Hello GPU"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
 ```
 
 ---
@@ -167,11 +203,10 @@ npx embedeer --model my-org/private-model \
 
 GPU support requires an additional provider package that ships a CUDA-enabled (or DirectML-enabled) ONNX Runtime binary.
 
-| Platform       | Provider  | Package                          |
-|----------------|-----------|----------------------------------|
-| Linux x64      | CUDA      | `@jsilvanus/ort-linux-x64-cuda`   |
-| Windows x64    | CUDA      | `@jsilvanus/ort-win32-x64-cuda`   |
-| Windows x64    | DirectML  | `@jsilvanus/ort-win32-x64-dml`    |
+| Platform       | Provider  | Package                                       |
+|----------------|-----------|-----------------------------------------------|
+| Linux x64      | CUDA      | `@jsilvanus/embedeer-ort-linux-x64-cuda`      |
+| Windows x64    | DirectML  | `@jsilvanus/embedeer-ort-win32-x64-dml`       |
 
 ### Provider selection logic
 

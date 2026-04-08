@@ -12,8 +12,8 @@ This repository is a **monorepo** managed with npm workspaces.
 | Package | Description |
 |---------|-------------|
 | [`@jsilvanus/embedeer`](packages/embedeer) | Main embeddings package (CPU + optional GPU) |
-| [`@jsilvanus/ort-linux-x64-cuda`](packages/ort-linux-x64-cuda) | CUDA provider for Linux x64 |
-| [`@jsilvanus/ort-win32-x64-dml`](packages/ort-win32-x64-dml)   | DirectML provider for Windows x64 |
+| [`@jsilvanus/embedeer-ort-linux-x64-cuda`](packages/ort-linux-x64-cuda) | CUDA provider for Linux x64 |
+| [`@jsilvanus/embedeer-ort-win32-x64-dml`](packages/ort-win32-x64-dml)   | DirectML provider for Windows x64 |
 
 ---
 
@@ -23,7 +23,7 @@ This repository is a **monorepo** managed with npm workspaces.
 
 ```bash
 npm install @jsilvanus/embedeer
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello world"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello world"
 ```
 
 ```js
@@ -31,6 +31,37 @@ import { Embedder } from '@jsilvanus/embedeer';
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2');
 const vectors = await embedder.embed(['Hello', 'World']);
 await embedder.destroy();
+```
+
+### GPU — use CUDA where available (auto-detect)
+
+Add the provider package for your platform, then pass `--device auto`.  
+`auto` tries CUDA on Linux and DirectML on Windows; silently falls back to CPU if no GPU is found.
+
+**Linux x64 (NVIDIA CUDA):**
+
+```bash
+# Install CUDA 12 + cuDNN 9 system libraries (Ubuntu/Debian)
+sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
+
+npm install @jsilvanus/embedeer
+npm install @jsilvanus/embedeer-ort-linux-x64-cuda
+
+# Auto-detect: uses CUDA on this system, CPU on any other
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
+
+# Or require GPU (throws if CUDA is unavailable):
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+```
+
+**Windows x64 (DirectML — any GPU: NVIDIA / AMD / Intel):**
+
+```bash
+npm install @jsilvanus/embedeer
+npm install @jsilvanus/embedeer-ort-win32-x64-dml
+
+# Auto-detect: uses DirectML on Windows, CPU elsewhere
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
 ```
 
 ---
@@ -49,10 +80,10 @@ sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
 
 # Install embedeer and the CUDA provider package
 npm install @jsilvanus/embedeer
-npm install @jsilvanus/ort-linux-x64-cuda
+npm install @jsilvanus/embedeer-ort-linux-x64-cuda
 
 # Run with GPU
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 ```
 
 ### Docker + NVIDIA CUDA
@@ -80,7 +111,7 @@ RUN apt-get update && apt-get install -y curl && \
 # Install embedeer + CUDA provider
 COPY package.json ./
 RUN npm install @jsilvanus/embedeer && \
-    npm install @jsilvanus/ort-linux-x64-cuda
+    npm install @jsilvanus/embedeer-ort-linux-x64-cuda
 
 COPY . .
 ```
@@ -92,7 +123,7 @@ docker build -t my-embedeer-app .
 
 # --gpus all enables NVIDIA GPU access inside the container
 docker run --rm --gpus all my-embedeer-app \
-  npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+  npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 ```
 
 **docker-compose:**
@@ -109,7 +140,7 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      npx embedeer --model Xenova/all-MiniLM-L6-v2
+      npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
                    --device gpu
                    --data "Hello GPU"
 ```
@@ -120,9 +151,9 @@ services:
 
 ```bash
 npm install @jsilvanus/embedeer
-npm install @jsilvanus/ort-win32-x64-dml
+npm install @jsilvanus/embedeer-ort-win32-x64-dml
 
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 ```
 
 ### GPU API options
@@ -142,10 +173,10 @@ const e4 = await Embedder.create(model, { provider: 'dml' });  // Windows Direct
 ```
 
 ```bash
-npx embedeer --device auto    # try GPU, fall back to CPU
-npx embedeer --device gpu     # require GPU
-npx embedeer --provider cuda  # explicit CUDA (Linux)
-npx embedeer --provider dml   # explicit DirectML (Windows)
+npx @jsilvanus/embedeer --device auto    # try GPU, fall back to CPU
+npx @jsilvanus/embedeer --device gpu     # require GPU
+npx @jsilvanus/embedeer --provider cuda  # explicit CUDA (Linux)
+npx @jsilvanus/embedeer --provider dml   # explicit DirectML (Windows)
 ```
 
 ---

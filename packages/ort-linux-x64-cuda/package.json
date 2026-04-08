@@ -1,9 +1,14 @@
 {
-  "name": "@jsilvanus/ort-linux-x64-cuda",
+  "name": "@jsilvanus/embedeer-ort-linux-x64-cuda",
   "version": "1.0.0",
   "description": "CUDA execution provider for embedeer on Linux x64",
   "type": "module",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "install.js",
+    "README.md"
+  ],
   "scripts": {
     "install": "node install.js"
   },
@@ -19,9 +24,12 @@
     "gpu",
     "linux"
   ],
-  "author": "",
+  "author": "jsilvanus",
   "license": "ISC",
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -6,6 +6,10 @@
   "bin": {
     "embedeer": "src/cli.js"
   },
+  "files": [
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "test": "node --test test/*.test.js"
   },
@@ -24,13 +28,19 @@
     "cuda",
     "onnxruntime"
   ],
-  "author": "",
+  "author": "jsilvanus",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "bugs": {
     "url": "https://github.com/jsilvanus/embedeer/issues"
   },
   "homepage": "https://github.com/jsilvanus/embedeer/tree/main/packages/embedeer#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1"
   }

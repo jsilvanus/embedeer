@@ -1,4 +1,4 @@
-# @jsilvanus/ort-win32-x64-dml
+# @jsilvanus/embedeer-ort-win32-x64-dml
 
 DirectML execution provider for [embedeer](https://github.com/jsilvanus/embedeer) on **Windows x64**.
 
@@ -27,7 +27,7 @@ No CUDA installation needed.
 npm install @jsilvanus/embedeer
 
 # Step 2 — DirectML provider
-npm install @jsilvanus/ort-win32-x64-dml
+npm install @jsilvanus/embedeer-ort-win32-x64-dml
 ```
 
 ## Usage
@@ -47,8 +47,8 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { provider: 'd
 
 ```bash
 # CLI — auto GPU (uses DirectML on Windows)
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello GPU"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello GPU"
 
 # CLI — explicit DirectML
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
 ```
