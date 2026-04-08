@@ -26,7 +26,7 @@ export class WorkerPool {
   /**
    * @param {string}   modelName  Hugging Face model identifier
    * @param {object} [options]
-   * @param {string}   [options.poolSize=2]         Number of parallel workers
+   * @param {number}   [options.poolSize=2]         Number of parallel workers
    * @param {string}   [options.mode='process']     'process' (isolated) or 'thread' (same process)
    * @param {string}   [options.pooling='mean']     Pooling strategy ('mean'|'cls'|'none')
    * @param {boolean}  [options.normalize=true]     Whether to L2-normalise embeddings

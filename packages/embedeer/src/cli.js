@@ -78,6 +78,7 @@ const KNOWN_FLAGS = new Set([
   '--pooling', '-p', '--no-normalize', '--dtype', '--token', '--cache-dir',
   '--device', '--provider',
 ]);
+const options = {
   model: 'Xenova/all-MiniLM-L6-v2',
   data: null,       // --data texts (array)
   file: null,       // --file path
