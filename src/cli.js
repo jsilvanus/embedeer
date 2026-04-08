@@ -43,6 +43,7 @@
 import { Embedder } from './embedder.js';
 import { getCacheDir, DEFAULT_CACHE_DIR } from './model-cache.js';
 import { readFileSync, writeFileSync, appendFileSync } from 'fs';
+import { explainForGitsema } from './gitsema-adapter.js';
 import readline from 'readline';
 
 // ── Argument parsing ────────────────────────────────────────────────────────
@@ -76,6 +77,8 @@ Options:
                                (empty line or full batch triggers immediate flush)
       --dump <path>            Write output to file instead of stdout
       --output <format>        Output: json|jsonl|csv|txt|sql (default: json)
+      --explain                 Run Explainer with a JSON payload (file or stdin)
+      --explain-file <path>     Read explain payload from file (JSON)
       --with-text              Include source text alongside each embedding
   -b, --batch-size <n>         Texts per worker batch (default: 32)
   -c, --concurrency <n>        Parallel workers (default: 2)
@@ -102,6 +105,7 @@ const KNOWN_FLAGS = new Set([
   '--mode', '--pooling', '-p', '--no-normalize', '--dtype', '--token',
   '--cache-dir', '--device', '--provider', '--delimiter', '-D',
   '--interactive', '-i', '--prefix', '--timer',
+  '--explain', '--explain-file',
 ]);
 const options = {
   model: 'nomic-embed-text',
@@ -124,6 +128,8 @@ const options = {
   provider: undefined,
   prefix: undefined,
   timer: false,
+  explain: false,
+  explainFile: null,
 };
 
 const positional = [];
@@ -148,6 +154,10 @@ for (let i = 0; i < args.length; i++) {
     options.delimiter = parseDelimiter(args[++i]);
   } else if (arg === '--interactive' || arg === '-i') {
     options.interactive = true;
+  } else if (arg === '--explain') {
+    options.explain = true;
+  } else if (arg === '--explain-file') {
+    options.explainFile = args[++i];
   } else if (arg === '--dump') {
     options.dump = args[++i];
   } else if (arg === '--output') {
@@ -238,6 +248,49 @@ function writeOutput(content, dumpPath) {
     console.error(`Output written to ${dumpPath}`);
   } else {
     console.log(content);
+  }
+}
+
+// --- Explain subcommand --------------------------------------------------
+async function runExplain(cacheDir) {
+  // Determine payload source: --explain-file, stdin, or --data / positional
+  let payloadRaw = null;
+  if (options.explainFile) {
+    payloadRaw = readFileSync(options.explainFile, 'utf8');
+  } else {
+    const stdinRaw = await readStdin();
+    if (stdinRaw) payloadRaw = stdinRaw;
+    else if (options.data && options.data.length > 0) payloadRaw = options.data[0];
+    else if (positional.length > 0) payloadRaw = positional[0];
+  }
+
+  if (!payloadRaw) {
+    console.error('Error: no explain payload provided. Use --explain-file or pipe JSON to stdin.');
+    process.exit(1);
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(payloadRaw);
+  } catch (err) {
+    console.error('Error parsing explain payload JSON:', err.message);
+    process.exit(1);
+  }
+
+  try {
+    const res = await explainForGitsema(payload, {
+      autoDestroy: true,
+      model: options.model,
+      token: options.token,
+      cacheDir,
+      dtype: options.dtype,
+      device: options.device,
+      provider: options.provider,
+    });
+    console.log(JSON.stringify(res, null, 2));
+  } catch (err) {
+    console.error('Explainer error:', err.message || err);
+    process.exit(1);
   }
 }
 
@@ -452,6 +505,10 @@ async function main() {
   const resolvedCacheDir = getCacheDir(options.cacheDir);
 
   // ── Interactive line-reader mode ─────────────────────────────────────────
+  if (options.explain) {
+    return runExplain(resolvedCacheDir);
+  }
+
   if (options.interactive) {
     return runInteractive(resolvedCacheDir);
   }
