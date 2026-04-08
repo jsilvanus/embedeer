@@ -1,5 +1,5 @@
 /**
- * Install / post-install check for @embedeer/ort-win32-x64-dml
+ * Install / post-install check for @jsilvanus/ort-win32-x64-dml
  *
  * onnxruntime-node ships DirectML support bundled on Windows x64.
  * No additional binary download is required.
@@ -12,13 +12,13 @@
 
 if (process.platform !== 'win32') {
   console.warn(
-    `[embedeer] @embedeer/ort-win32-x64-dml: skipping checks on ${process.platform}/${process.arch} (this package is for Windows x64 only)`,
+    `[embedeer] @jsilvanus/ort-win32-x64-dml: skipping checks on ${process.platform}/${process.arch} (this package is for Windows x64 only)`,
   );
   process.exit(0);
 }
 
 console.log(
-  '[embedeer] @embedeer/ort-win32-x64-dml: DirectML is bundled with onnxruntime-node on Windows.\n' +
+  '[embedeer] @jsilvanus/ort-win32-x64-dml: DirectML is bundled with onnxruntime-node on Windows.\n' +
   '  No additional binary download is required.\n' +
   '  GPU acceleration via DirectML is available on Windows 10 (1903+) / Windows 11\n' +
   '  with any DirectX 12-capable GPU.\n' +

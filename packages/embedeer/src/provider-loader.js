@@ -4,9 +4,8 @@
  * pipeline.
  *
  * Provider packages are published as separate optional npm packages:
- *   @embedeer/ort-linux-x64-cuda   — CUDA on Linux x64
- *   @embedeer/ort-win32-x64-cuda   — CUDA on Windows x64
- *   @embedeer/ort-win32-x64-dml    — DirectML on Windows x64
+ *   @jsilvanus/ort-linux-x64-cuda   — CUDA on Linux x64
+ *   @jsilvanus/ort-win32-x64-dml    — DirectML on Windows x64
  *
  * Each provider package exports:
  *   activate(): Promise<void>   — runs any setup needed before pipeline()
@@ -24,9 +23,8 @@
  * @type {Record<string, string>}
  */
 export const PROVIDER_PACKAGES = {
-  'linux-x64-cuda':  '@embedeer/ort-linux-x64-cuda',
-  'win32-x64-cuda':  '@embedeer/ort-win32-x64-cuda',
-  'win32-x64-dml':   '@embedeer/ort-win32-x64-dml',
+  'linux-x64-cuda':  '@jsilvanus/ort-linux-x64-cuda',
+  'win32-x64-dml':   '@jsilvanus/ort-win32-x64-dml',
 };
 
 /**

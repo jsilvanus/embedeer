@@ -1,4 +1,4 @@
-# @embedeer/ort-win32-x64-dml
+# @jsilvanus/ort-win32-x64-dml
 
 DirectML execution provider for [embedeer](https://github.com/jsilvanus/embedeer) on **Windows x64**.
 
@@ -24,10 +24,10 @@ No CUDA installation needed.
 
 ```bash
 # Step 1 — main package
-npm install embedeer
+npm install @jsilvanus/embedeer
 
 # Step 2 — DirectML provider
-npm install @embedeer/ort-win32-x64-dml
+npm install @jsilvanus/ort-win32-x64-dml
 ```
 
 ## Usage

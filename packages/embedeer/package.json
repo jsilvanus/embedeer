@@ -1,5 +1,5 @@
 {
-  "name": "embedeer",
+  "name": "@jsilvanus/embedeer",
   "version": "1.0.0",
   "description": "A node.js embedding tool with optional GPU acceleration",
   "main": "src/index.js",

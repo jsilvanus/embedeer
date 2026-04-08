@@ -1,5 +1,5 @@
 {
-  "name": "@embedeer/ort-linux-x64-cuda",
+  "name": "@jsilvanus/ort-linux-x64-cuda",
   "version": "1.0.0",
   "description": "CUDA execution provider for embedeer on Linux x64",
   "type": "module",

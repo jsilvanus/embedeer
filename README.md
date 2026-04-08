@@ -11,10 +11,9 @@ This repository is a **monorepo** managed with npm workspaces.
 
 | Package | Description |
 |---------|-------------|
-| [`embedeer`](packages/embedeer) | Main embeddings package (CPU + optional GPU) |
-| [`@embedeer/ort-linux-x64-cuda`](packages/ort-linux-x64-cuda) | CUDA provider for Linux x64 |
-| [`@embedeer/ort-win32-x64-dml`](packages/ort-win32-x64-dml)   | DirectML provider for Windows x64 |
-| [`@embedeer/ort-win32-x64-cuda`](packages/ort-win32-x64-cuda) | Windows CUDA (placeholder — use DML on Windows) |
+| [`@jsilvanus/embedeer`](packages/embedeer) | Main embeddings package (CPU + optional GPU) |
+| [`@jsilvanus/ort-linux-x64-cuda`](packages/ort-linux-x64-cuda) | CUDA provider for Linux x64 |
+| [`@jsilvanus/ort-win32-x64-dml`](packages/ort-win32-x64-dml)   | DirectML provider for Windows x64 |
 
 ---
 
@@ -23,12 +22,12 @@ This repository is a **monorepo** managed with npm workspaces.
 ### CPU (default, works everywhere)
 
 ```bash
-npm install embedeer
+npm install @jsilvanus/embedeer
 npx embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello world"
 ```
 
 ```js
-import { Embedder } from 'embedeer';
+import { Embedder } from '@jsilvanus/embedeer';
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2');
 const vectors = await embedder.embed(['Hello', 'World']);
 await embedder.destroy();
@@ -49,8 +48,8 @@ await embedder.destroy();
 sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
 
 # Install embedeer and the CUDA provider package
-npm install embedeer
-npm install @embedeer/ort-linux-x64-cuda
+npm install @jsilvanus/embedeer
+npm install @jsilvanus/ort-linux-x64-cuda
 
 # Run with GPU
 npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
@@ -80,8 +79,8 @@ RUN apt-get update && apt-get install -y curl && \
 
 # Install embedeer + CUDA provider
 COPY package.json ./
-RUN npm install embedeer && \
-    npm install @embedeer/ort-linux-x64-cuda
+RUN npm install @jsilvanus/embedeer && \
+    npm install @jsilvanus/ort-linux-x64-cuda
 
 COPY . .
 ```
@@ -120,8 +119,8 @@ services:
 **System requirements:** Windows 10 (1903+) or 11, any DirectX 12 GPU, up-to-date drivers
 
 ```bash
-npm install embedeer
-npm install @embedeer/ort-win32-x64-dml
+npm install @jsilvanus/embedeer
+npm install @jsilvanus/ort-win32-x64-dml
 
 npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 ```
@@ -129,7 +128,7 @@ npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
 ### GPU API options
 
 ```js
-import { Embedder } from 'embedeer';
+import { Embedder } from '@jsilvanus/embedeer';
 
 // Auto-detect GPU, silent CPU fallback if unavailable
 const e1 = await Embedder.create(model, { device: 'auto' });

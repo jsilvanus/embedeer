@@ -1,5 +1,5 @@
 /**
- * @embedeer/ort-win32-x64-dml
+ * @jsilvanus/ort-win32-x64-dml
  *
  * DirectML execution provider for embedeer on Windows x64.
  *
@@ -30,7 +30,7 @@
 export async function activate() {
   if (process.platform !== 'win32') {
     throw new Error(
-      `@embedeer/ort-win32-x64-dml: DirectML is only available on Windows (current platform: ${process.platform}).`,
+      `@jsilvanus/ort-win32-x64-dml: DirectML is only available on Windows (current platform: ${process.platform}).`,
     );
   }
   // DirectML is natively available via onnxruntime-node on Windows 10/11.

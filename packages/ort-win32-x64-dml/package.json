@@ -1,5 +1,5 @@
 {
-  "name": "@embedeer/ort-win32-x64-dml",
+  "name": "@jsilvanus/ort-win32-x64-dml",
   "version": "1.0.0",
   "description": "DirectML execution provider for embedeer on Windows x64",
   "type": "module",
