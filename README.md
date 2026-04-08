@@ -412,6 +412,40 @@ On Windows x64: GPU order is `cuda → dml`.
 
 ---
 
+## Performance Optimizations
+
+Embedeer exposes runtime knobs and helper scripts to tune throughput for your host.
+
+- Pre-load models: run `Embedder.loadModel(model, { dtype, cacheDir })` or use the `bench` scripts so workers start instantly without re-downloading models.
+- Reuse `Embedder` instances: create a single `Embedder` and call `embed()` repeatedly instead of creating and destroying instances per batch.
+- Batch size vs concurrency:
+  - CPU: moderate batch sizes (16–64) with multiple workers (concurrency ≥ 2) usually give best throughput.
+  - GPU: larger batches (64–256) with low concurrency (1–2) are typically fastest.
+- BLAS threading: avoid oversubscription by setting `OMP_NUM_THREADS` and `MKL_NUM_THREADS` to `Math.floor(cpu_cores / concurrency)` before starting workers.
+- Device/provider: use `cuda` on Linux and `dml` (DirectML) on Windows when available; `device: 'auto'` will try providers and fall back to CPU.
+- Automatic tuning: use `bench/grid-search.js` to sweep `batchSize`, `concurrency`, and `dtype` for your host and save results. You can generate and persist a per-user profile and apply it automatically via the `Embedder` APIs.
+
+Examples:
+
+```bash
+# CPU quick grid
+node bench/grid-search.js --device cpu --sample-size 200 --out bench/grid-results-cpu.json
+
+# GPU quick grid
+node bench/grid-search.js --device gpu --sample-size 100 --out bench/grid-results-gpu.json
+```
+
+Programmatic profile generation (writes `~/.embedeer/perf-profile.json`):
+
+```js
+import { Embedder } from '@jsilvanus/embedeer';
+
+await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize: 100 });
+// Embedder.create() will auto-apply a saved per-user profile by default
+```
+
+--- 
+
 ## How it works
 
 ```
@@ -446,34 +480,12 @@ Tests use Node's built-in `node:test` runner. No real model download required.
 
 ---
 
-## Performance Optimizations
+## Collaboration
 
-Embedeer exposes runtime knobs and helper scripts to tune throughput for your host.
+You are welcome to open a PR, especially if you have performance-related assistance.
 
-- Pre-load models: run `Embedder.loadModel(model, { dtype, cacheDir })` or use the `bench` scripts so workers start instantly without re-downloading models.
-- Reuse `Embedder` instances: create a single `Embedder` and call `embed()` repeatedly instead of creating and destroying instances per batch.
-- Batch size vs concurrency:
-  - CPU: moderate batch sizes (16–64) with multiple workers (concurrency ≥ 2) usually give best throughput.
-  - GPU: larger batches (64–256) with low concurrency (1–2) are typically fastest.
-- BLAS threading: avoid oversubscription by setting `OMP_NUM_THREADS` and `MKL_NUM_THREADS` to `Math.floor(cpu_cores / concurrency)` before starting workers.
-- Device/provider: use `cuda` on Linux and `dml` (DirectML) on Windows when available; `device: 'auto'` will try providers and fall back to CPU.
-- Automatic tuning: use `bench/grid-search.js` to sweep `batchSize`, `concurrency`, and `dtype` for your host and save results. You can generate and persist a per-user profile and apply it automatically via the `Embedder` APIs.
+## License
 
-Examples:
+MIT
 
-```bash
-# CPU quick grid
-node bench/grid-search.js --device cpu --sample-size 200 --out bench/grid-results-cpu.json
 
-# GPU quick grid
-node bench/grid-search.js --device gpu --sample-size 100 --out bench/grid-results-gpu.json
-```
-
-Programmatic profile generation (writes `~/.embedeer/perf-profile.json`):
-
-```js
-import { Embedder } from '@jsilvanus/embedeer';
-
-await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize: 100 });
-// Embedder.create() will auto-apply a saved per-user profile by default
-```
