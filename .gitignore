@@ -5,7 +5,7 @@ node_modules/
 dist/
 
 # Ignore PNPM files
-.pnpm*
+pnpm*
 
 # Ignore VSCode settings
 .vscode/
