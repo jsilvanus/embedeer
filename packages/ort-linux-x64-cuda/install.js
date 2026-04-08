@@ -1,7 +1,8 @@
 /**
  * Install / post-install check for @embedeer/ort-linux-x64-cuda
  *
- * onnxruntime-node v1.14+ ships libonnxruntime_providers_cuda.so on Linux x64.
+ * onnxruntime-node v1.20+ ships libonnxruntime_providers_cuda.so on Linux x64.
+ * (@huggingface/transformers@4.x requires onnxruntime-node@1.24.x which ships CUDA.)
  * No additional binary download is required. This script just verifies that
  * the necessary CUDA 12 system libraries are present, and prints actionable
  * install instructions if they are not.

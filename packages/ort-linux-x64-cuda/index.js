@@ -4,9 +4,10 @@
  * CUDA execution provider for embedeer on Linux x64.
  *
  * How it works:
- *   onnxruntime-node v1.14+ ships libonnxruntime_providers_cuda.so on Linux x64.
+ *   onnxruntime-node v1.20+ ships libonnxruntime_providers_cuda.so on Linux x64.
  *   No additional binary download is required — the CUDA execution provider is
  *   already bundled with the standard onnxruntime-node package.
+ *   (@huggingface/transformers@4.x requires onnxruntime-node@1.24.x which ships CUDA.)
  *
  *   This package verifies that the required CUDA 12 system libraries are
  *   available before attempting to use the CUDA execution provider.
@@ -98,7 +99,8 @@ function findLib(libName) {
  * Activate the CUDA execution provider.
  *
  * Checks that all required CUDA 12 / cuDNN 9 system libraries are present.
- * onnxruntime-node v1.14+ bundles libonnxruntime_providers_cuda.so on Linux x64,
+ * onnxruntime-node v1.20+ bundles libonnxruntime_providers_cuda.so on Linux x64
+ * (@huggingface/transformers@4.x requires onnxruntime-node@1.24.x which ships CUDA),
  * so no additional binary download is needed — only system CUDA libraries are required.
  *
  * @returns {Promise<void>}

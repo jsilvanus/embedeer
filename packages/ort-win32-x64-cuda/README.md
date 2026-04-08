@@ -16,7 +16,7 @@ See [`@embedeer/ort-win32-x64-dml`](../ort-win32-x64-dml/README.md) for full doc
 
 ## Why CUDA isn't available on Windows
 
-`onnxruntime-node` prebuilt binaries include CUDA support on **Linux x64** only (CUDA 12 + cuDNN 9). Windows CUDA support would require either:
+`onnxruntime-node` prebuilt binaries include CUDA support on **Linux x64** only (CUDA 12 + cuDNN 9, onnxruntime-node v1.24.x as required by @huggingface/transformers@4.x). Windows CUDA support would require either:
 - A future official ONNX Runtime release with Windows CUDA prebuilts
 - A custom `onnxruntime-node` build against CUDA on Windows
 
