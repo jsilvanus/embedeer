@@ -11,6 +11,9 @@ pnpm*
 # Ignore VSCode settings
 .vscode/
 
+# Coverage tools
+coverage/
+
 #ignore log files
 *.log
 
