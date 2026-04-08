@@ -1,6 +1,6 @@
 {
   "name": "@jsilvanus/embedeer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A node.js embedding tool with optional GPU acceleration",
   "main": "src/index.js",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "bench"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
