@@ -96,6 +96,7 @@ export class WorkerPool {
    */
   async initialize() {
     if (this._initialized) return;
+    console.error(`Starting ${this.poolSize} worker(s); loading model: ${this.modelName} (may download)`);
 
     const readyPromises = [];
     for (let i = 0; i < this.poolSize; i++) {
@@ -105,6 +106,7 @@ export class WorkerPool {
     }
 
     await Promise.all(readyPromises);
+    console.error(`Worker pool initialized — model should be loaded.`);
     this._initialized = true;
   }
 
@@ -161,6 +163,7 @@ export class WorkerPool {
 
     worker.on('message', ({ type, id, embeddings, error }) => {
       if (type === 'ready') {
+        console.error(`Worker ready (model loaded)`);
         this.idleWorkers.push(worker);
         resolveReady();
         this._dispatch();

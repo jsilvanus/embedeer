@@ -35,7 +35,9 @@ async function init() {
     ...buildPipelineOptions(dtype),
     ...(deviceStr ? { device: deviceStr } : {}),
   };
+  console.error(`Thread worker: loading model ${modelName} into ${cacheDir || 'default cache'} (this may download)`);
   extractor = await pipeline('feature-extraction', modelName, pipelineOpts);
+  console.error(`Thread worker: model ${modelName} loaded`);
   parentPort.postMessage({ type: 'ready' });
 }
 

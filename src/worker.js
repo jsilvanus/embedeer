@@ -37,7 +37,9 @@ process.on('message', async (msg) => {
         ...buildPipelineOptions(msg.dtype),
         ...(deviceStr ? { device: deviceStr } : {}),
       };
+      console.error(`Worker: loading model ${msg.modelName} into ${msg.cacheDir || 'default cache'} (this may download)`);
       extractor = await pipeline('feature-extraction', msg.modelName, pipelineOpts);
+      console.error(`Worker: model ${msg.modelName} loaded`);
       process.send({ type: 'ready' });
     } catch (err) {
       process.send({ type: 'error', id: null, error: err.message });

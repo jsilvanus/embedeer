@@ -17,7 +17,7 @@
  *   cat big.txt | embedeer --model <name> --interactive --output csv --dump out.csv
  *
  * Options:
- *   -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
+ *   -m, --model <name>           Hugging Face model (default: nomic-embed-text)
  *   -d, --data <text...>         Text(s) to embed (JSON array or individual strings)
  *       --file <path>            File of texts (JSON array or one text per line)
  *   -D, --delimiter <str>        Record separator for stdin/file input (default: \n)
@@ -36,6 +36,7 @@
  *       --cache-dir <path>       Custom model cache directory (default: ~/.embedeer/models)
  *       --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
  *       --provider <name>        Execution provider override: cpu|cuda|dml
+ *       --prefix <str>           Text prepended to every input before embedding
  *   -h, --help                   Show this help
  */
 
@@ -66,7 +67,7 @@ Interactive / streaming line-reader:
   cat big.txt | embedeer --model <name> -i --output csv --dump out.csv
 
 Options:
-  -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
+  -m, --model <name>           Hugging Face model (default: nomic-embed-text)
   -d, --data <text...>         Text(s) or JSON array to embed
       --file <path>            Input file: JSON array or delimited texts
   -D, --delimiter <str>        Record separator for stdin/file (default: \\n)
@@ -86,6 +87,9 @@ Options:
       --cache-dir <path>       Model cache directory (default: ${DEFAULT_CACHE_DIR})
       --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
       --provider <name>        Execution provider override: cpu|cuda|dml
+      --prefix <str>           Text prepended to every input before embedding
+                               (e.g. "search_query: " for nomic-embed-text)
+      --timer                  Print elapsed wall-clock time to stderr when done
   -h, --help                   Show this help
 `.trim());
 }
@@ -97,10 +101,10 @@ const KNOWN_FLAGS = new Set([
   '--output', '--with-text', '--batch-size', '-b', '--concurrency', '-c',
   '--mode', '--pooling', '-p', '--no-normalize', '--dtype', '--token',
   '--cache-dir', '--device', '--provider', '--delimiter', '-D',
-  '--interactive', '-i',
+  '--interactive', '-i', '--prefix', '--timer',
 ]);
 const options = {
-  model: 'Xenova/all-MiniLM-L6-v2',
+  model: 'nomic-embed-text',
   data: null,         // --data texts (array)
   file: null,         // --file path
   delimiter: '\n',    // --delimiter record separator for stdin/file
@@ -118,6 +122,8 @@ const options = {
   cacheDir: undefined,
   device: undefined,
   provider: undefined,
+  prefix: undefined,
+  timer: false,
 };
 
 const positional = [];
@@ -168,6 +174,10 @@ for (let i = 0; i < args.length; i++) {
     options.device = args[++i];
   } else if (arg === '--provider') {
     options.provider = args[++i];
+  } else if (arg === '--prefix') {
+    options.prefix = args[++i];
+  } else if (arg === '--timer') {
+    options.timer = true;
   } else {
     positional.push(arg);
   }
@@ -290,6 +300,7 @@ async function readStdin() {
  *   • Progress/prompt messages always go to stderr.
  */
 async function runInteractive(cacheDir) {
+  const t0 = options.timer ? performance.now() : 0;
   // json and sql produce complete documents that can't be appended to
   // incrementally; switch to jsonl so each batch emits self-contained lines.
   if (options.output === 'json' || options.output === 'sql') {
@@ -348,7 +359,7 @@ async function runInteractive(cacheDir) {
     batch = [];
     batchNumber++;
 
-    const embeddings = await embedder.embed(texts);
+    const embeddings = await embedder.embed(texts, { prefix: options.prefix });
     let content;
 
     if (options.output === 'csv') {
@@ -420,6 +431,10 @@ async function runInteractive(cacheDir) {
       if (outputFile) {
         console.error(`Done. ${batchNumber} batch(es) written to ${outputFile}`);
       }
+      if (options.timer) {
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+        console.error(`Time: ${elapsed}s`);
+      }
       resolve();
     });
 
@@ -488,6 +503,8 @@ async function main() {
 }
 
 async function runEmbedding(texts, cacheDir) {
+  const t0 = options.timer ? performance.now() : 0;
+
   const embedder = await Embedder.create(options.model, {
     batchSize: options.batchSize,
     concurrency: options.concurrency,
@@ -502,11 +519,15 @@ async function runEmbedding(texts, cacheDir) {
   });
 
   try {
-    const embeddings = await embedder.embed(texts);
+    const embeddings = await embedder.embed(texts, { prefix: options.prefix });
     const content = formatOutput(texts, embeddings, options.output, options.withText);
     writeOutput(content, options.dump);
   } finally {
     await embedder.destroy();
+    if (options.timer) {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+      console.error(`Time: ${elapsed}s (${texts.length} texts)`);
+    }
   }
 }
 

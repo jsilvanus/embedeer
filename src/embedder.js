@@ -32,7 +32,7 @@ export class Embedder {
    * @param {string} [options.device]            Compute device: 'auto'|'cpu'|'gpu' (default: 'cpu')
    * @param {string} [options.provider]          Execution provider override: 'cpu'|'cuda'|'dml'
    */
-  constructor(modelName = 'Xenova/all-MiniLM-L6-v2', options = {}) {
+  constructor(modelName = 'nomic-embed-text', options = {}) {
     this.modelName = modelName;
     this.batchSize = options.batchSize ?? 32;
     this._pool = new WorkerPool(modelName, {
@@ -79,7 +79,9 @@ export class Embedder {
     const resolvedCacheDir = getCacheDir(cacheDir);
     if (token) process.env.HF_TOKEN = token;
     env.cacheDir = resolvedCacheDir;
+    console.error(`Downloading / loading model: ${modelName} → ${resolvedCacheDir} (this may take a while)`);
     await pipeline('feature-extraction', modelName, buildPipelineOptions(dtype));
+    console.error(`Model ${modelName} downloaded/loaded into ${resolvedCacheDir}`);
     return { modelName, cacheDir: resolvedCacheDir };
   }
 
@@ -100,16 +102,23 @@ export class Embedder {
    * in parallel whenever there are more batches than workers.
    *
    * @param {string | string[]} texts
+   * @param {object} [options]
+   * @param {string} [options.prefix]  Task prefix prepended to every text before
+   *   embedding (e.g. `'search_query: '` for nomic-embed-text). When omitted or
+   *   empty the texts are passed through unchanged — useful when the caller has
+   *   already added its own prefix.
    * @returns {Promise<number[][]>} One embedding vector per input text
    */
-  async embed(texts) {
+  async embed(texts, { prefix } = {}) {
     const input = Array.isArray(texts) ? texts : [texts];
     if (input.length === 0) return [];
 
+    const prepared = prefix ? input.map((t) => prefix + t) : input;
+
     // Split into batches
     const batches = [];
-    for (let i = 0; i < input.length; i += this.batchSize) {
-      batches.push(input.slice(i, i + this.batchSize));
+    for (let i = 0; i < prepared.length; i += this.batchSize) {
+      batches.push(prepared.slice(i, i + this.batchSize));
     }
 
     // Submit all batches to the pool simultaneously — workers pick them
