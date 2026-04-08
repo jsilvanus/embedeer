@@ -31,7 +31,7 @@
     "onnxruntime"
   ],
   "author": "jsilvanus",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=18"
