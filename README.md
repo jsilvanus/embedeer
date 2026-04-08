@@ -42,7 +42,7 @@ await embedder.destroy();
 
 **System requirements:** NVIDIA GPU + driver ≥ 525, CUDA 12, cuDNN 9
 
-`onnxruntime-node` v1.14+ ships `libonnxruntime_providers_cuda.so` on Linux x64. No custom binary needed — just install CUDA 12 + cuDNN 9 system libraries and the npm package:
+`onnxruntime-node` v1.24.x ships `libonnxruntime_providers_cuda.so` on Linux x64. No custom binary needed — just install CUDA 12 + cuDNN 9 system libraries and the npm package:
 
 ```bash
 # Install CUDA 12 + cuDNN 9 (Ubuntu/Debian)
@@ -54,6 +54,65 @@ npm install @embedeer/ort-linux-x64-cuda
 
 # Run with GPU
 npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+```
+
+### Docker + NVIDIA CUDA
+
+Use an [NVIDIA CUDA Docker image](https://hub.docker.com/r/nvidia/cuda) as your base — it ships all required CUDA 12 + cuDNN 9 libraries, so no manual `apt install` is needed in your Dockerfile.
+
+**Requirements on the host:**
+- NVIDIA GPU driver ≥ 525
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed
+
+**Example `Dockerfile`:**
+
+```dockerfile
+# CUDA 12 + cuDNN 9 runtime — all required libs are pre-installed
+FROM nvidia/cuda:12.6.3-cudnn9-runtime-ubuntu24.04
+
+WORKDIR /app
+
+# Install Node.js (e.g. via NodeSource)
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install embedeer + CUDA provider
+COPY package.json ./
+RUN npm install embedeer && \
+    npm install @embedeer/ort-linux-x64-cuda
+
+COPY . .
+```
+
+**Build and run:**
+
+```bash
+docker build -t my-embedeer-app .
+
+# --gpus all enables NVIDIA GPU access inside the container
+docker run --rm --gpus all my-embedeer-app \
+  npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+```
+
+**docker-compose:**
+
+```yaml
+services:
+  embedeer:
+    build: .
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      npx embedeer --model Xenova/all-MiniLM-L6-v2
+                   --device gpu
+                   --data "Hello GPU"
 ```
 
 ### Windows x64 + DirectML (any GPU)
