@@ -48,6 +48,9 @@ export class WorkerPool {
     device,
     provider,
     _WorkerClass,
+    // Optional overrides for worker script paths (generation vs embedder)
+    workerScript,
+    threadWorkerScript,
   } = {}) {
     this.modelName = modelName;
     this.poolSize = poolSize;
@@ -63,13 +66,13 @@ export class WorkerPool {
     // Pick defaults based on mode; can be overridden for testing.
     if (_WorkerClass) {
       this._WorkerClass = _WorkerClass;
-      this._workerScript = PROCESS_WORKER_PATH; // doesn't matter for tests
+      this._workerScript = workerScript ?? PROCESS_WORKER_PATH; // tests may override
     } else if (mode === 'thread') {
       this._WorkerClass = ThreadWorker;
-      this._workerScript = THREAD_WORKER_PATH;
+      this._workerScript = threadWorkerScript ?? THREAD_WORKER_PATH;
     } else {
       this._WorkerClass = ChildProcessWorker;
-      this._workerScript = PROCESS_WORKER_PATH;
+      this._workerScript = workerScript ?? PROCESS_WORKER_PATH;
     }
 
     /** @type {Array} all workers (active + idle) */
@@ -115,7 +118,7 @@ export class WorkerPool {
    * @param {string[]} texts
    * @returns {Promise<number[][]>} Array of embedding vectors
    */
-  run(texts) {
+  run(payload) {
     if (!this._initialized) {
       return Promise.reject(
         new Error('WorkerPool must be initialized before calling run(). Call initialize() first.'),
@@ -124,7 +127,7 @@ export class WorkerPool {
     return new Promise((resolve, reject) => {
       const id = this._nextId++;
       this.taskCallbacks.set(id, { resolve, reject });
-      this.pendingTasks.push({ id, texts });
+      this.pendingTasks.push({ id, payload });
       this._dispatch();
     });
   }
@@ -161,7 +164,8 @@ export class WorkerPool {
       },
     });
 
-    worker.on('message', ({ type, id, embeddings, error }) => {
+    worker.on('message', (msg) => {
+      const { type, id } = msg;
       if (type === 'ready') {
         console.error(`Worker ready (model loaded)`);
         this.idleWorkers.push(worker);
@@ -172,14 +176,16 @@ export class WorkerPool {
         this.taskCallbacks.delete(id);
         this._workerToTaskId.delete(worker);
         this.idleWorkers.push(worker);
-        cb.resolve(embeddings);
+        // Resolve with the most likely payload field (embeddings | text | result) or the message
+        const resultPayload = msg.embeddings ?? msg.text ?? msg.result ?? msg;
+        cb.resolve(resultPayload);
         this._dispatch();
       } else if (type === 'error') {
         const cb = this.taskCallbacks.get(id);
         if (cb) {
           this.taskCallbacks.delete(id);
           this._workerToTaskId.delete(worker);
-          cb.reject(new Error(error));
+          cb.reject(new Error(msg.error));
         }
         this.idleWorkers.push(worker);
         this._dispatch();
@@ -225,7 +231,18 @@ export class WorkerPool {
       const task = this.pendingTasks.shift();
       const worker = this.idleWorkers.shift();
       this._workerToTaskId.set(worker, task.id);
-      worker.postMessage({ type: 'task', id: task.id, texts: task.texts });
+      // Support legacy embedding API where run(texts) passes an array of texts,
+      // as well as newer generic payload objects for generation tasks.
+      if (Array.isArray(task.payload)) {
+        // legacy embeddings path
+        worker.postMessage({ type: 'task', id: task.id, texts: task.payload });
+      } else if (task.payload && typeof task.payload === 'object') {
+        // generic payload: spread fields (e.g. prompt, genOpts)
+        worker.postMessage({ type: 'task', id: task.id, ...task.payload });
+      } else {
+        // fallback: send raw payload under `payload` key
+        worker.postMessage({ type: 'task', id: task.id, payload: task.payload });
+      }
     }
   }
 
