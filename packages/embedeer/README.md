@@ -102,12 +102,16 @@ npx @jsilvanus/embedeer [options]
 Model management (pull / cache model):
   npx @jsilvanus/embedeer --model <name>
 
-Embed texts:
+Embed texts (batch):
   npx @jsilvanus/embedeer --model <name> --data "text1" "text2" ...
   npx @jsilvanus/embedeer --model <name> --data '["text1","text2"]'
   npx @jsilvanus/embedeer --model <name> --file texts.txt
   echo '["t1","t2"]' | npx @jsilvanus/embedeer --model <name>
   printf 'a\0b\0c' | npx @jsilvanus/embedeer --model <name> --delimiter '\0'
+
+Interactive / streaming line-reader:
+  npx @jsilvanus/embedeer --model <name> --interactive --dump out.jsonl
+  cat big.txt | npx @jsilvanus/embedeer --model <name> -i --output csv --dump out.csv
 
 Options:
   -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
@@ -115,6 +119,7 @@ Options:
       --file <path>            Input file: JSON array or delimited texts
   -D, --delimiter <str>        Record separator for stdin/file (default: \n)
                                Escape sequences supported: \0 \n \t \r
+  -i, --interactive            Interactive line-reader (see below)
       --dump <path>            Write output to file instead of stdout
       --output <format>        Output: json|jsonl|csv|txt|sql (default: json)
       --with-text              Include source text alongside each embedding
@@ -143,8 +148,47 @@ Texts can be provided in any of these ways (checked in order):
 | Inline JSON | `--data '["text1","text2"]'` |
 | File | `--file texts.txt` (JSON array or one record per line) |
 | Stdin | Pipe or redirect — auto-detected; TTY is skipped |
+| Interactive | `--interactive` / `-i` — line-reader, embeds as you type |
 
 **Stdin auto-detection:** when `stdin` is not a TTY (i.e. data is piped or redirected), embedeer reads it before deciding what to do. JSON arrays are accepted directly; otherwise records are split on the delimiter.
+
+---
+
+## Interactive Line-Reader Mode (`-i` / `--interactive`)
+
+The interactive mode opens a line-by-line reader that starts embedding as records arrive — ideal for pasting large datasets into a terminal or streaming data from another process.
+
+```bash
+# Open an interactive session (paste lines, Ctrl+D when done)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --interactive --dump embeddings.jsonl
+
+# Stream a large file through interactive mode with CSV output
+cat big.txt | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 \
+  --interactive --output csv --dump embeddings.csv
+
+# Interactive with GPU, custom batch size, txt output
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 \
+  --interactive --device auto --batch-size 16 --output txt --dump vecs.txt
+```
+
+**How it works:**
+
+| Event | What happens |
+|-------|-------------|
+| Type a line, press Enter | Record is buffered |
+| Buffer reaches `--batch-size` | Auto-flush: embed + append to output |
+| Type an empty line | Manual flush: embed whatever is buffered |
+| Ctrl+D (EOF) | Flush remaining records and exit |
+| Ctrl+C | Flush remaining records and exit |
+
+**Behaviour notes:**
+
+- Progress messages (`Batch N: M record(s) → file`) always go to **stderr** — they never pollute piped output.
+- When stdin is a TTY, a `> ` prompt is shown on stderr.
+- Output defaults to **stdout** if `--dump` is omitted; a tip is printed when running in TTY mode.
+- `--output json` and `--output sql` are automatically promoted to `jsonl` since they produce complete documents that cannot be appended to incrementally.
+- `--output csv` writes the dimension header (`text,dim_0,dim_1,...`) on the first batch only; subsequent batches append data rows.
+- Each interactive session **clears** the `--dump` file on start so you always get a fresh output file.
 
 ### Configurable delimiter (`-D` / `--delimiter`)
 

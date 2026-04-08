@@ -215,6 +215,28 @@ npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output sql --dump inse
 npx @jsilvanus/embedeer --model $MODEL --output txt --with-text --data "hello" "world"
 ```
 
+### Interactive / streaming line-reader (`-i` / `--interactive`)
+
+Paste records one per line and get embeddings as soon as each batch fills (or when you press Enter on an empty line to flush manually). Ideal for interactive use or streaming large datasets through a pipeline.
+
+```bash
+MODEL=Xenova/all-MiniLM-L6-v2
+
+# Interactive terminal session — paste lines, Ctrl+D when done
+npx @jsilvanus/embedeer --model $MODEL --interactive --dump embeddings.jsonl
+
+# Stream a large file in batches (auto-flushes every 32 lines)
+cat corpus.txt | npx @jsilvanus/embedeer --model $MODEL -i --output csv --dump out.csv
+
+# GPU-accelerated interactive mode
+npx @jsilvanus/embedeer --model $MODEL --interactive --device auto \
+  --batch-size 64 --output jsonl --dump out.jsonl
+```
+
+**Flushing:** batch fills to `--batch-size` (auto) or empty line (manual). Ctrl+D finishes. Ctrl+C aborts.  
+**Output:** progress messages go to stderr; embeddings go to `--dump` file or stdout.  
+**csv** writes the header on the first batch only. **json**/**sql** are promoted to **jsonl** automatically.
+
 ---
 
 ## Provider Selection Logic

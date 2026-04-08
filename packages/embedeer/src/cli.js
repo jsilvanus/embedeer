@@ -5,12 +5,16 @@
  * Model management:
  *   embedeer --model <name>                        Pull / cache a model
  *
- * Embedding:
+ * Embedding (batch):
  *   embedeer --model <name> --data "text1" "text2" ...
  *   embedeer --model <name> --data '["text1","text2"]'
  *   embedeer --model <name> --file texts.txt
  *   echo '["t1","t2"]' | embedeer --model <name>
  *   printf 'a\0b\0c' | embedeer --model <name> --delimiter '\0'
+ *
+ * Interactive / streaming line-reader:
+ *   embedeer --model <name> --interactive --dump out.jsonl
+ *   cat big.txt | embedeer --model <name> --interactive --output csv --dump out.csv
  *
  * Options:
  *   -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
@@ -18,6 +22,7 @@
  *       --file <path>            File of texts (JSON array or one text per line)
  *   -D, --delimiter <str>        Record separator for stdin/file input (default: \n)
  *                                Escape sequences: \0 (null byte), \n, \t, \r
+ *   -i, --interactive            Interactive line-reader: embed as lines arrive
  *       --dump <path>            Write output to file instead of stdout
  *       --output <format>        Output format: json|jsonl|csv|txt|sql (default: json)
  *       --with-text              Include source text in json/txt output
@@ -36,7 +41,8 @@
 
 import { Embedder } from './embedder.js';
 import { getCacheDir, DEFAULT_CACHE_DIR } from './model-cache.js';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync } from 'fs';
+import readline from 'readline';
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -49,11 +55,15 @@ embedeer — parallel batched embeddings from Hugging Face
 Model management (pull / cache):
   embedeer --model <name>
 
-Embedding:
+Embedding (batch):
   embedeer --model <name> [--data "text1" "text2" ...]
   embedeer --model <name> --file texts.txt
   echo '["t1","t2"]' | embedeer --model <name>
   printf 'a\\0b\\0c' | embedeer --model <name> --delimiter '\\0'
+
+Interactive / streaming line-reader:
+  embedeer --model <name> --interactive --dump out.jsonl
+  cat big.txt | embedeer --model <name> -i --output csv --dump out.csv
 
 Options:
   -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
@@ -61,6 +71,8 @@ Options:
       --file <path>            Input file: JSON array or delimited texts
   -D, --delimiter <str>        Record separator for stdin/file (default: \\n)
                                Escape sequences supported: \\0 \\n \\t \\r
+  -i, --interactive            Interactive line-reader: embed as lines arrive
+                               (empty line or full batch triggers immediate flush)
       --dump <path>            Write output to file instead of stdout
       --output <format>        Output: json|jsonl|csv|txt|sql (default: json)
       --with-text              Include source text alongside each embedding
@@ -85,15 +97,17 @@ const KNOWN_FLAGS = new Set([
   '--output', '--with-text', '--batch-size', '-b', '--concurrency', '-c',
   '--mode', '--pooling', '-p', '--no-normalize', '--dtype', '--token',
   '--cache-dir', '--device', '--provider', '--delimiter', '-D',
+  '--interactive', '-i',
 ]);
 const options = {
   model: 'Xenova/all-MiniLM-L6-v2',
-  data: null,       // --data texts (array)
-  file: null,       // --file path
-  delimiter: '\n',  // --delimiter record separator for stdin/file
-  dump: null,       // --dump path
-  output: 'json',   // json | jsonl | csv | txt | sql
-  withText: false,  // --with-text: include source text in output
+  data: null,         // --data texts (array)
+  file: null,         // --file path
+  delimiter: '\n',    // --delimiter record separator for stdin/file
+  interactive: false, // --interactive / -i: line-reader mode
+  dump: null,         // --dump path
+  output: 'json',     // json | jsonl | csv | txt | sql
+  withText: false,    // --with-text: include source text in output
   batchSize: 32,
   concurrency: 2,
   mode: 'process',
@@ -126,6 +140,8 @@ for (let i = 0; i < args.length; i++) {
     options.file = args[++i];
   } else if (arg === '--delimiter' || arg === '-D') {
     options.delimiter = parseDelimiter(args[++i]);
+  } else if (arg === '--interactive' || arg === '-i') {
+    options.interactive = true;
   } else if (arg === '--dump') {
     options.dump = args[++i];
   } else if (arg === '--output') {
@@ -255,10 +271,175 @@ async function readStdin() {
   });
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Interactive / streaming line-reader mode ────────────────────────────────
+
+/**
+ * Interactive mode: read one text record per line from stdin, embed in
+ * configurable batches, and stream results to a file (or stdout).
+ *
+ * Flushing triggers:
+ *   • Batch reaches --batch-size lines (auto-flush)
+ *   • User types an empty line (manual flush)
+ *   • EOF / Ctrl+D (flush remaining records and exit)
+ *   • Ctrl+C (flush remaining records and exit)
+ *
+ * Output:
+ *   • Formats json and sql are not appendable — they are promoted to jsonl.
+ *   • csv writes the dimension header once (on the first batch).
+ *   • All other formats append each batch as independent lines.
+ *   • Progress/prompt messages always go to stderr.
+ */
+async function runInteractive(cacheDir) {
+  // json and sql produce complete documents that can't be appended to
+  // incrementally; switch to jsonl so each batch emits self-contained lines.
+  if (options.output === 'json' || options.output === 'sql') {
+    console.error(
+      `Warning: --output ${options.output} is not suitable for interactive mode. Switching to jsonl.`
+    );
+    options.output = 'jsonl';
+  }
+
+  const isTTY = process.stdin.isTTY;
+  const outputFile = options.dump;
+
+  if (isTTY && !outputFile) {
+    console.error(
+      'Tip: use --dump <path> to write output to a file so it does not mix with input.'
+    );
+  }
+
+  // Load the model before opening the reader so we are ready to embed immediately.
+  console.error(`Loading model: ${options.model}…`);
+  const embedder = await Embedder.create(options.model, {
+    batchSize: options.batchSize,
+    concurrency: options.concurrency,
+    mode: options.mode,
+    pooling: options.pooling,
+    normalize: options.normalize,
+    dtype: options.dtype,
+    token: options.token,
+    cacheDir,
+    device: options.device,
+    provider: options.provider,
+  });
+
+  if (isTTY) {
+    console.error('Model ready. Paste records below, one per line.');
+    console.error(`Batch size: ${options.batchSize}. Empty line = flush now. Ctrl+D = done. Ctrl+C = abort.`);
+  }
+
+  // Initialise / clear the output file so each interactive session starts fresh.
+  if (outputFile) {
+    writeFileSync(outputFile, '', 'utf8');
+  }
+
+  let csvHeaderWritten = false;
+  let batch = [];
+  let batchNumber = 0;
+  let flushing = false;
+
+  /**
+   * Embed the current batch and write its output.
+   * The readline interface must be paused before calling this.
+   */
+  async function flushBatch() {
+    if (batch.length === 0) return;
+    const texts = [...batch];
+    batch = [];
+    batchNumber++;
+
+    const embeddings = await embedder.embed(texts);
+    let content;
+
+    if (options.output === 'csv') {
+      const full = formatOutput(texts, embeddings, 'csv', options.withText);
+      if (!csvHeaderWritten) {
+        content = full;                                // includes header
+        csvHeaderWritten = true;
+      } else {
+        content = full.split('\n').slice(1).join('\n'); // data rows only
+      }
+    } else {
+      content = formatOutput(texts, embeddings, options.output, options.withText);
+    }
+
+    if (outputFile) {
+      appendFileSync(outputFile, content + '\n', 'utf8');
+      console.error(`Batch ${batchNumber}: ${texts.length} record(s) → ${outputFile}`);
+    } else {
+      process.stdout.write(content + '\n');
+    }
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    // Route the prompt to stderr so it never pollutes stdout embeddings.
+    output: isTTY ? process.stderr : null,
+    terminal: isTTY,
+  });
+
+  if (isTTY) rl.prompt();
+
+  rl.on('line', (line) => {
+    const text = line.trim();
+
+    if (text !== '') {
+      batch.push(text);
+    }
+
+    const shouldFlush = text === '' || batch.length >= options.batchSize;
+
+    if (shouldFlush && !flushing && batch.length > 0) {
+      flushing = true;
+      rl.pause();
+      flushBatch()
+        .then(() => {
+          flushing = false;
+          rl.resume();
+          if (isTTY) rl.prompt();
+        })
+        .catch((err) => {
+          console.error('Error embedding batch:', err.message);
+          flushing = false;
+          rl.resume();
+          if (isTTY) rl.prompt();
+        });
+    } else if (isTTY) {
+      rl.prompt();
+    }
+  });
+
+  await new Promise((resolve) => {
+    rl.on('close', async () => {
+      try {
+        await flushBatch();
+      } catch (err) {
+        console.error('Error embedding final batch:', err.message);
+      }
+      await embedder.destroy();
+      if (outputFile) {
+        console.error(`Done. ${batchNumber} batch(es) written to ${outputFile}`);
+      }
+      resolve();
+    });
+
+    // Handle Ctrl+C — flush remaining records then exit cleanly.
+    rl.on('SIGINT', () => {
+      console.error('\nInterrupted — flushing remaining records…');
+      rl.close(); // triggers 'close' event above
+    });
+  });
+}
+
+
 
 async function main() {
   const resolvedCacheDir = getCacheDir(options.cacheDir);
+
+  // ── Interactive line-reader mode ─────────────────────────────────────────
+  if (options.interactive) {
+    return runInteractive(resolvedCacheDir);
+  }
 
   // ── Model-only mode (pull / cache) ──────────────────────────────────────
   const hasDataSource = options.data || options.file || positional.length > 0;
