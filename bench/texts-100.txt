@@ -96,3 +96,5 @@ The French mathematician and physicist Marie Curie won two Nobel Prizes in diffe
 The agricultural revolution enabled the rise of cities and civilizations.
 Zero-shot learning allows models to handle tasks they were not explicitly trained on.
 The Copernican Revolution displaced Earth from the center of the universe.
+The Internet has fundamentally changed how people communicate, work, and access information.
+Vector databases enable fast approximate nearest-neighbor search over high-dimensional embeddings.

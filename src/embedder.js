@@ -16,6 +16,7 @@
 import { pipeline, env } from '@huggingface/transformers';
 import { WorkerPool } from './worker-pool.js';
 import { getCacheDir, buildPipelineOptions } from './model-cache.js';
+import os from 'os';
 
 export class Embedder {
   /**
@@ -34,17 +35,36 @@ export class Embedder {
    */
   constructor(modelName = 'nomic-embed-text', options = {}) {
     this.modelName = modelName;
-    this.batchSize = options.batchSize ?? 32;
+    // Determine sensible defaults based on host machine and requested device.
+    const numCores = os.cpus()?.length ?? 1;
+
+    // If user didn't provide a device, default to CPU.
+    const device = options.device ?? 'cpu';
+
+    // Default concurrency: for GPU prefer a small pool (1), for CPU default to numCores.
+    const defaultConcurrency = device === 'gpu' ? 1 : Math.max(1, numCores);
+    const concurrency = options.concurrency ?? defaultConcurrency;
+
+    // Tune BLAS / thread usage to avoid oversubscription when using multiple workers.
+    // Set threads-per-worker to floor(numCores / concurrency) (at least 1).
+    const threadsPerWorker = Math.max(1, Math.floor(numCores / concurrency));
+    if (!process.env.OMP_NUM_THREADS) process.env.OMP_NUM_THREADS = String(threadsPerWorker);
+    if (!process.env.MKL_NUM_THREADS) process.env.MKL_NUM_THREADS = String(threadsPerWorker);
+
+    this.batchSize = options.batchSize ?? (device === 'gpu' ? 64 : 32);
+    // Default provider selection for GPU if not provided
+    const provider = options.provider ?? (device === 'gpu' ? (process.platform === 'win32' ? 'dml' : 'cuda') : options.provider);
+
     this._pool = new WorkerPool(modelName, {
-      poolSize: options.concurrency ?? 2,
+      poolSize: concurrency,
       mode: options.mode ?? 'process',
       pooling: options.pooling ?? 'mean',
       normalize: options.normalize ?? true,
       token: options.token,
       dtype: options.dtype,
       cacheDir: options.cacheDir ?? getCacheDir(),
-      device: options.device,
-      provider: options.provider,
+      device,
+      provider,
     });
   }
 

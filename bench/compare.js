@@ -12,6 +12,8 @@
  *   --ollama-url <url>     Ollama base URL (default: http://localhost:11434)
  *   --batch-size <n>       embedeer batch size (default: 32)
  *   --concurrency <n>      embedeer worker count (default: 2)
+ *   --mode process|thread  embedeer worker mode (default: thread — avoids a Windows libuv
+ *                          assertion crash that affects child-process mode with ONNX runtime)
  *   --dtype <type>         embedeer quantization: fp32|fp16|q8|q4|auto (default: none)
  *   --skip-embedeer        Skip the embedeer runner
  *   --skip-ollama          Skip both Ollama runners
@@ -20,6 +22,7 @@
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import os from 'os';
 import { Embedder } from '../src/embedder.js';
 import { getCacheDir } from '../src/model-cache.js';
 
@@ -29,10 +32,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const args = process.argv.slice(2);
 const opts = {
-  model:        'nomic-embed-text',
+  model:        'nomic-ai/nomic-embed-text-v1',
+  // Updated default model to the newer Nomic model path
   ollamaUrl:    'http://localhost:11434',
   batchSize:    32,
   concurrency:  2,
+  mode:         'thread', // thread avoids Windows libuv UV_HANDLE_CLOSING crash with ONNX in child processes
   dtype:        undefined,
   skipEmbedeer: false,
   skipOllama:   false,
@@ -40,18 +45,19 @@ const opts = {
 
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if      (a === '--model')        opts.model        = args[++i];
-  else if (a === '--ollama-url')   opts.ollamaUrl    = args[++i];
-  else if (a === '--batch-size')   opts.batchSize    = parseInt(args[++i], 10);
-  else if (a === '--concurrency')  opts.concurrency  = parseInt(args[++i], 10);
-  else if (a === '--dtype')        opts.dtype        = args[++i];
+  if      (a === '--model')         opts.model        = args[++i];
+  else if (a === '--ollama-url')    opts.ollamaUrl    = args[++i];
+  else if (a === '--batch-size')    opts.batchSize    = parseInt(args[++i], 10);
+  else if (a === '--concurrency')   opts.concurrency  = parseInt(args[++i], 10);
+  else if (a === '--mode')          opts.mode         = args[++i];
+  else if (a === '--dtype')         opts.dtype        = args[++i];
   else if (a === '--skip-embedeer') opts.skipEmbedeer = true;
   else if (a === '--skip-ollama')   opts.skipOllama   = true;
 }
 
 // ── Texts ─────────────────────────────────────────────────────────────────────
 
-const texts = readFileSync(join(__dirname, 'texts-100.txt'), 'utf8')
+const texts = readFileSync(join(__dirname, 'texts-1000.txt'), 'utf8')
   .split('\n').map((l) => l.trim()).filter(Boolean);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,6 +90,7 @@ async function runEmbedeer() {
   const embedder = await Embedder.create(opts.model, {
     batchSize:   opts.batchSize,
     concurrency: opts.concurrency,
+    mode:        opts.mode,
     dtype:       opts.dtype,
     cacheDir,
   });
@@ -91,16 +98,38 @@ async function runEmbedeer() {
   const embeddings = await embedder.embed(texts);
   const elapsed = performance.now() - t0;
   await embedder.destroy();
-  return { elapsed, dims: embeddings[0]?.length, label: `embedeer (concurrency=${opts.concurrency}, batch=${opts.batchSize})` };
+  return { elapsed, dims: embeddings[0]?.length, label: `embedeer (${opts.mode}, concurrency=${opts.concurrency}, batch=${opts.batchSize})` };
+}
+
+async function runEmbedeerGPU() {
+  const cacheDir = getCacheDir();
+  const embedder = await Embedder.create(opts.model, {
+    batchSize:   opts.batchSize,
+    // keep GPU concurrency low to avoid device contention
+    concurrency: 1,
+    // run GPU worker in a separate process for isolation
+    mode:        'process',
+    dtype:       opts.dtype,
+    cacheDir,
+    device:      'gpu',
+    // pick provider based on host OS: DirectML on Windows, CUDA elsewhere
+    provider:    process.platform === 'win32' ? 'dml' : 'cuda',
+  });
+  const t0 = performance.now();
+  const embeddings = await embedder.embed(texts);
+  const elapsed = performance.now() - t0;
+  await embedder.destroy();
+  return { elapsed, dims: embeddings[0]?.length, label: `embedeer (gpu, provider=cuda, batch=${opts.batchSize})` };
 }
 
 async function runOllamaLegacy() {
   const url = `${opts.ollamaUrl}/api/embeddings`;
+  const ollamaModel = 'nomic-embed-text';
   const tasks = texts.map((text) => async () => {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: opts.model, prompt: text }),
+      body: JSON.stringify({ model: ollamaModel, prompt: text }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     return (await res.json()).embedding;
@@ -113,11 +142,12 @@ async function runOllamaLegacy() {
 
 async function runOllamaBatch() {
   const url = `${opts.ollamaUrl}/api/embed`;
+  const ollamaModel = 'nomic-embed-text';
   const t0 = performance.now();
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: opts.model, input: texts }),
+    body: JSON.stringify({ model: ollamaModel, input: texts }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   const json = await res.json();
@@ -166,42 +196,106 @@ function printTable(results) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-console.log(`\nembedeer vs Ollama — embedding benchmark`);
-console.log(`Model: ${opts.model}   Texts: ${texts.length}\n`);
+async function main() {
+  console.log(`\nembedeer vs Ollama — embedding benchmark`);
+  console.log(`Model: ${opts.model}   Texts: ${texts.length}   embedeer mode: ${opts.mode}\n`);
 
-const results = [];
+  const results = [];
 
-if (!opts.skipEmbedeer) {
-  process.stderr.write('Running embedeer…\n');
-  try {
-    results.push(await runEmbedeer());
-    process.stderr.write('  done.\n');
-  } catch (err) {
-    console.error(`  embedeer failed: ${err.message}`);
+  // Pre-load model into local cache so workers don't have to download it.
+  if (!opts.skipEmbedeer) {
+    try {
+      process.stderr.write('Pre-loading model into cache (this may take a while)…\n');
+      await Embedder.loadModel(opts.model, { dtype: opts.dtype, cacheDir: getCacheDir() });
+      process.stderr.write('  model pre-loaded.\n');
+    } catch (err) {
+      console.error(`  model pre-load failed: ${err.message}`);
+    }
+
+    // Tune concurrency: default to number of CPU cores if not provided
+    const numCores = os.cpus().length || 1;
+    const cpuConcurrency = opts.concurrency ?? Math.max(1, numCores);
+
+    // Tune BLAS / threads to avoid oversubscription: set threads per worker
+    const threadsPerWorker = Math.max(1, Math.floor(numCores / cpuConcurrency));
+    process.env.OMP_NUM_THREADS = String(threadsPerWorker);
+    process.env.MKL_NUM_THREADS = String(threadsPerWorker);
+
+    // Create and reuse one Embedder instance for CPU (avoid reinitialization)
+    process.stderr.write(`Running embedeer (cpu, concurrency=${cpuConcurrency})…\n`);
+    let cpuEmbedder;
+    try {
+      cpuEmbedder = await Embedder.create(opts.model, {
+        batchSize: opts.batchSize,
+        concurrency: cpuConcurrency,
+        mode: opts.mode,
+        dtype: opts.dtype,
+        cacheDir: getCacheDir(),
+      });
+      const t0 = performance.now();
+      const embeddings = await cpuEmbedder.embed(texts);
+      const elapsed = performance.now() - t0;
+      results.push({ elapsed, dims: embeddings[0]?.length, label: `embedeer (cpu, ${opts.mode}, concurrency=${cpuConcurrency}, batch=${opts.batchSize})` });
+      process.stderr.write('  done.\n');
+    } catch (err) {
+      console.error(`  embedeer failed: ${err.message}`);
+    } finally {
+      if (cpuEmbedder) await cpuEmbedder.destroy();
+    }
+
+    // GPU-backed embedeer: prefer small concurrency (1–2) and larger batch sizes
+    const gpuConcurrency = 1; // keep single GPU worker to avoid contention
+    process.stderr.write('Running embedeer (gpu)…\n');
+    let gpuEmbedder;
+    try {
+      gpuEmbedder = await Embedder.create(opts.model, {
+        batchSize: opts.batchSize * 2, // increase batch for GPU
+        concurrency: gpuConcurrency,
+        mode: 'process',
+        dtype: opts.dtype,
+        cacheDir: getCacheDir(),
+        device: 'gpu',
+        provider: process.platform === 'win32' ? 'dml' : 'cuda',
+      });
+      const t0g = performance.now();
+      const embeddingsG = await gpuEmbedder.embed(texts);
+      const elapsedG = performance.now() - t0g;
+      results.push({ elapsed: elapsedG, dims: embeddingsG[0]?.length, label: `embedeer (gpu, provider=${process.platform === 'win32' ? 'dml' : 'cuda'}, batch=${opts.batchSize * 2})` });
+      process.stderr.write('  done.\n');
+    } catch (err) {
+      console.error(`  embedeer (gpu) failed: ${err.message}`);
+    } finally {
+      if (gpuEmbedder) await gpuEmbedder.destroy();
+    }
   }
+
+  if (!opts.skipOllama) {
+    process.stderr.write('Running Ollama /api/embeddings…\n');
+    try {
+      results.push(await runOllamaLegacy());
+      process.stderr.write('  done.\n');
+    } catch (err) {
+      console.error(`  /api/embeddings failed: ${err.message}`);
+    }
+
+    process.stderr.write('Running Ollama /api/embed…\n');
+    try {
+      results.push(await runOllamaBatch());
+      process.stderr.write('  done.\n');
+    } catch (err) {
+      console.error(`  /api/embed failed: ${err.message}`);
+    }
+  }
+
+  if (results.length === 0) {
+    console.error('No results — all runners failed or were skipped.');
+    process.exit(1);
+  }
+
+  printTable(results);
 }
 
-if (!opts.skipOllama) {
-  process.stderr.write('Running Ollama /api/embeddings…\n');
-  try {
-    results.push(await runOllamaLegacy());
-    process.stderr.write('  done.\n');
-  } catch (err) {
-    console.error(`  /api/embeddings failed: ${err.message}`);
-  }
-
-  process.stderr.write('Running Ollama /api/embed…\n');
-  try {
-    results.push(await runOllamaBatch());
-    process.stderr.write('  done.\n');
-  } catch (err) {
-    console.error(`  /api/embed failed: ${err.message}`);
-  }
-}
-
-if (results.length === 0) {
-  console.error('No results — all runners failed or were skipped.');
+main().catch((err) => {
+  console.error(err);
   process.exit(1);
-}
-
-printTable(results);
+});
