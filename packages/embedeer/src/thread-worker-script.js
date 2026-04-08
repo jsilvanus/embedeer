@@ -18,8 +18,9 @@
 import { workerData, parentPort } from 'worker_threads';
 import { pipeline, env } from '@huggingface/transformers';
 import { buildPipelineOptions } from './model-cache.js';
+import { resolveProvider } from './provider-loader.js';
 
-const { modelName, pooling, normalize, token, dtype, cacheDir } = workerData;
+const { modelName, pooling, normalize, token, dtype, cacheDir, device, provider } = workerData;
 
 // Apply configuration before loading the model.
 if (token) process.env.HF_TOKEN = token;
@@ -28,7 +29,13 @@ if (cacheDir) env.cacheDir = cacheDir;
 let extractor;
 
 async function init() {
-  extractor = await pipeline('feature-extraction', modelName, buildPipelineOptions(dtype));
+  // Activate GPU provider (if requested) before creating the pipeline.
+  const deviceStr = await resolveProvider(device, provider);
+  const pipelineOpts = {
+    ...buildPipelineOptions(dtype),
+    ...(deviceStr ? { device: deviceStr } : {}),
+  };
+  extractor = await pipeline('feature-extraction', modelName, pipelineOpts);
   parentPort.postMessage({ type: 'ready' });
 }
 

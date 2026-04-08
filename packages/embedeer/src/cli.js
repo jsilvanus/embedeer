@@ -25,6 +25,8 @@
  *       --dtype <type>        Quantization: fp32|fp16|q8|q4|q4f16|auto
  *       --token <tok>         Hugging Face API token (overrides HF_TOKEN env var)
  *       --cache-dir <path>    Custom model cache directory (default: ~/.embedeer/models)
+ *       --device <mode>       Compute device: auto|cpu|gpu (default: cpu)
+ *       --provider <name>     Execution provider override: cpu|cuda|dml
  *   -h, --help                Show this help
  */
 
@@ -62,6 +64,8 @@ Options:
       --dtype <type>        Quantization: fp32|fp16|q8|q4|q4f16|auto
       --token <tok>         Hugging Face API token
       --cache-dir <path>    Model cache directory (default: ${DEFAULT_CACHE_DIR})
+      --device <mode>       Compute device: auto|cpu|gpu (default: cpu)
+      --provider <name>     Execution provider override: cpu|cuda|dml
   -h, --help                Show this help
 `.trim());
 }
@@ -72,6 +76,7 @@ const KNOWN_FLAGS = new Set([
   '--help', '-h', '--model', '-m', '--data', '-d', '--file', '--dump',
   '--output', '--batch-size', '-b', '--concurrency', '-c', '--mode',
   '--pooling', '-p', '--no-normalize', '--dtype', '--token', '--cache-dir',
+  '--device', '--provider',
 ]);
   model: 'Xenova/all-MiniLM-L6-v2',
   data: null,       // --data texts (array)
@@ -86,6 +91,8 @@ const KNOWN_FLAGS = new Set([
   dtype: undefined,
   token: undefined,
   cacheDir: undefined,
+  device: undefined,
+  provider: undefined,
 };
 
 const positional = [];
@@ -126,6 +133,10 @@ for (let i = 0; i < args.length; i++) {
     options.token = args[++i];
   } else if (arg === '--cache-dir') {
     options.cacheDir = args[++i];
+  } else if (arg === '--device') {
+    options.device = args[++i];
+  } else if (arg === '--provider') {
+    options.provider = args[++i];
   } else {
     positional.push(arg);
   }
@@ -250,6 +261,8 @@ async function runEmbedding(texts, cacheDir) {
     dtype: options.dtype,
     token: options.token,
     cacheDir,
+    device: options.device,
+    provider: options.provider,
   });
 
   try {

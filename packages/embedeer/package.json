@@ -1,0 +1,37 @@
+{
+  "name": "embedeer",
+  "version": "1.0.0",
+  "description": "A node.js embedding tool with optional GPU acceleration",
+  "main": "src/index.js",
+  "bin": {
+    "embedeer": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jsilvanus/embedeer.git",
+    "directory": "packages/embedeer"
+  },
+  "keywords": [
+    "embeddings",
+    "huggingface",
+    "nlp",
+    "transformers",
+    "parallel",
+    "gpu",
+    "cuda",
+    "onnxruntime"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/jsilvanus/embedeer/issues"
+  },
+  "homepage": "https://github.com/jsilvanus/embedeer/tree/main/packages/embedeer#readme",
+  "dependencies": {
+    "@huggingface/transformers": "^4.0.1"
+  }
+}

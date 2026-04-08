@@ -1,34 +1,24 @@
 {
-  "name": "embedeer",
+  "name": "embedeer-monorepo",
   "version": "1.0.0",
-  "description": "A node.js embedding tool",
-  "main": "src/index.js",
-  "bin": {
-    "embedeer": "src/cli.js"
-  },
+  "private": true,
+  "description": "Monorepo for embedeer and its optional GPU provider packages",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "start": "node src/cli.js"
+    "test": "npm run test --workspace=packages/embedeer",
+    "test:embedeer": "npm run test --workspace=packages/embedeer"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jsilvanus/embedeer.git"
   },
-  "keywords": [
-    "embeddings",
-    "huggingface",
-    "nlp",
-    "transformers",
-    "parallel"
-  ],
   "author": "",
   "license": "ISC",
-  "type": "module",
   "bugs": {
     "url": "https://github.com/jsilvanus/embedeer/issues"
   },
-  "homepage": "https://github.com/jsilvanus/embedeer#readme",
-  "dependencies": {
-    "@huggingface/transformers": "^4.0.1"
-  }
+  "homepage": "https://github.com/jsilvanus/embedeer#readme"
 }
+

@@ -18,6 +18,7 @@
 
 import { pipeline, env } from '@huggingface/transformers';
 import { buildPipelineOptions } from './model-cache.js';
+import { resolveProvider } from './provider-loader.js';
 
 let extractor;
 let pooling;
@@ -30,7 +31,13 @@ process.on('message', async (msg) => {
       // Apply auth and cache config before loading the model.
       if (msg.token) process.env.HF_TOKEN = msg.token;
       if (msg.cacheDir) env.cacheDir = msg.cacheDir;
-      extractor = await pipeline('feature-extraction', msg.modelName, buildPipelineOptions(msg.dtype));
+      // Activate GPU provider (if requested) before creating the pipeline.
+      const deviceStr = await resolveProvider(msg.device, msg.provider);
+      const pipelineOpts = {
+        ...buildPipelineOptions(msg.dtype),
+        ...(deviceStr ? { device: deviceStr } : {}),
+      };
+      extractor = await pipeline('feature-extraction', msg.modelName, pipelineOpts);
       process.send({ type: 'ready' });
     } catch (err) {
       process.send({ type: 'error', id: null, error: err.message });

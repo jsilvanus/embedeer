@@ -1,0 +1,27 @@
+{
+  "name": "@embedeer/ort-win32-x64-cuda",
+  "version": "1.0.0",
+  "description": "CUDA execution provider for embedeer on Windows x64",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "install": "node install.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jsilvanus/embedeer.git",
+    "directory": "packages/ort-win32-x64-cuda"
+  },
+  "keywords": [
+    "embedeer",
+    "onnxruntime",
+    "cuda",
+    "gpu",
+    "windows"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  }
+}
