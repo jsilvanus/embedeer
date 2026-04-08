@@ -85,42 +85,8 @@ async function pLimit(tasks, limit) {
 
 // ── Runners ───────────────────────────────────────────────────────────────────
 
-async function runEmbedeer() {
-  const cacheDir = getCacheDir();
-  const embedder = await Embedder.create(opts.model, {
-    batchSize:   opts.batchSize,
-    concurrency: opts.concurrency,
-    mode:        opts.mode,
-    dtype:       opts.dtype,
-    cacheDir,
-  });
-  const t0 = performance.now();
-  const embeddings = await embedder.embed(texts);
-  const elapsed = performance.now() - t0;
-  await embedder.destroy();
-  return { elapsed, dims: embeddings[0]?.length, label: `embedeer (${opts.mode}, concurrency=${opts.concurrency}, batch=${opts.batchSize})` };
-}
-
-async function runEmbedeerGPU() {
-  const cacheDir = getCacheDir();
-  const embedder = await Embedder.create(opts.model, {
-    batchSize:   opts.batchSize,
-    // keep GPU concurrency low to avoid device contention
-    concurrency: 1,
-    // run GPU worker in a separate process for isolation
-    mode:        'process',
-    dtype:       opts.dtype,
-    cacheDir,
-    device:      'gpu',
-    // pick provider based on host OS: DirectML on Windows, CUDA elsewhere
-    provider:    process.platform === 'win32' ? 'dml' : 'cuda',
-  });
-  const t0 = performance.now();
-  const embeddings = await embedder.embed(texts);
-  const elapsed = performance.now() - t0;
-  await embedder.destroy();
-  return { elapsed, dims: embeddings[0]?.length, label: `embedeer (gpu, provider=cuda, batch=${opts.batchSize})` };
-}
+// Note: inline embedeer CPU/GPU runs are used in `main()`; the standalone
+// helper functions were removed to avoid unused-function lint warnings.
 
 async function runOllamaLegacy() {
   const url = `${opts.ollamaUrl}/api/embeddings`;

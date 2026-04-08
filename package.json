@@ -43,5 +43,8 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^10.2.0"
   }
 }
