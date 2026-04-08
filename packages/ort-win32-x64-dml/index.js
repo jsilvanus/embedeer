@@ -3,36 +3,42 @@
  *
  * DirectML execution provider for embedeer on Windows x64.
  *
- * DirectML supports NVIDIA, AMD, and Intel GPUs on Windows via the
- * Direct3D 12 API — no CUDA installation required.
+ * How it works:
+ *   onnxruntime-node ships DirectML support on Windows x64 out of the box.
+ *   No additional binary download is required — DirectML is bundled with
+ *   the standard onnxruntime-node package and comes with Windows 10/11.
  *
- * @see packages/ort-linux-x64-cuda/index.js for full documentation.
+ * Hardware:
+ *   Supports NVIDIA, AMD, Intel, and Qualcomm GPUs via Direct3D 12.
+ *   No CUDA installation required.
+ *
+ * System requirements:
+ *   - Windows 10 (1903+) or Windows 11
+ *   - Any DirectX 12-capable GPU (most GPUs from 2016+)
+ *   - Up-to-date GPU drivers (from your GPU vendor)
  */
-
-import { existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const BINARY_PATH = join(__dirname, 'vendor', 'onnxruntime_binding.node');
 
 /**
- * Activate the DirectML provider on Windows x64.
+ * Activate the DirectML execution provider.
+ *
+ * DirectML is bundled with onnxruntime-node on Windows and available natively
+ * on Windows 10/11. No system library installation is required.
+ *
  * @returns {Promise<void>}
- * @throws {Error} If the native binary is not present.
+ * @throws {Error} If not running on Windows.
  */
 export async function activate() {
-  if (!existsSync(BINARY_PATH)) {
+  if (process.platform !== 'win32') {
     throw new Error(
-      `@embedeer/ort-win32-x64-dml: native DirectML binary not found at ${BINARY_PATH}. ` +
-      `Re-run: npm install @embedeer/ort-win32-x64-dml`,
+      `@embedeer/ort-win32-x64-dml: DirectML is only available on Windows (current platform: ${process.platform}).`,
     );
   }
-  // TODO: wire up the custom ORT binary to onnxruntime-node resolution.
+  // DirectML is natively available via onnxruntime-node on Windows 10/11.
+  // onnxruntime will load the DirectML EP automatically when device='dml' is requested.
 }
 
 /**
+ * Returns the device string passed to @huggingface/transformers pipeline().
  * @returns {string}
  */
 export function getDevice() {

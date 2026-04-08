@@ -2,112 +2,92 @@
 
 CUDA execution provider for [embedeer](https://github.com/jsilvanus/embedeer) on **Linux x64**.
 
-Install this package alongside `embedeer` to enable GPU-accelerated embeddings using NVIDIA CUDA.
+Install this package alongside `embedeer` to enable GPU-accelerated embeddings using NVIDIA CUDA on Linux.
 
----
+## How it works
 
-## Installation (two-step)
+`onnxruntime-node` v1.14+ ships `libonnxruntime_providers_cuda.so` on Linux x64 as part of its standard npm package — **no additional binary download is required**.
+
+This package verifies that the required CUDA 12 system libraries are present, then returns `device='cuda'` so that `@huggingface/transformers` pipeline runs on the GPU.
+
+## System Requirements
+
+| Requirement | Version |
+|-------------|---------|
+| NVIDIA GPU Driver | ≥ 525 (CUDA 12 compatible) |
+| CUDA Toolkit | 12.x (`libcudart.so.12`, `libcublas.so.12`, `libcublasLt.so.12`, `libcurand.so.10`, `libcufft.so.11`) |
+| cuDNN | 9.x (`libcudnn.so.9`) |
+| OS | Linux x64 |
+
+### Installing CUDA 12 + cuDNN 9
+
+**Ubuntu/Debian (recommended):**
+```bash
+# Add NVIDIA package repository
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+
+# Install CUDA 12 and cuDNN 9
+sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
+
+# Add to PATH / LD_LIBRARY_PATH
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**CUDA Toolkit installer:** https://developer.nvidia.com/cuda-downloads  
+**cuDNN download:** https://developer.nvidia.com/cudnn-downloads  
+
+Verify installation:
+```bash
+nvidia-smi         # confirm GPU is detected
+nvcc --version     # confirm CUDA toolkit is installed
+```
+
+## Installation
 
 ```bash
-# Step 1 — install embedeer
+# Step 1 — main package
 npm install embedeer
 
-# Step 2 — install the CUDA provider for Linux x64
+# Step 2 — CUDA provider
 npm install @embedeer/ort-linux-x64-cuda
 ```
 
-> **Requirements**
-> - Linux x86_64
-> - NVIDIA GPU with CUDA drivers installed (CUDA 12.x recommended)
-> - NVIDIA CUDA Toolkit matching the binary version
-
----
-
 ## Usage
-
-Once installed, embedeer automatically detects and uses this provider:
 
 ```js
 import { Embedder } from 'embedeer';
 
-// Auto-detect GPU (falls back to CPU if no provider is installed)
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
-  device: 'auto',
-});
+// Auto-detect GPU (falls back to CPU if CUDA unavailable)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { device: 'auto' });
 
-// Require GPU (throws if not available)
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
-  device: 'gpu',
-});
+// Require GPU (throws with clear error if CUDA unavailable)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { device: 'gpu' });
 
-// Explicitly request CUDA
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
-  provider: 'cuda',
-});
+// Explicit CUDA
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { provider: 'cuda' });
 ```
-
-CLI:
 
 ```bash
-# Auto GPU (falls back to CPU)
+# CLI — auto GPU
 npx embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello GPU"
 
-# Require GPU
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
-
-# Explicit CUDA provider
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello GPU"
+# CLI — explicit CUDA
+npx embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
 ```
 
----
+## Error messages
 
-## How it works
+If CUDA libraries are missing, you'll see:
 
-This package provides:
+```
+@embedeer/ort-linux-x64-cuda: Missing CUDA system libraries: libcudart.so.12, libcudnn.so.9
 
-1. **`install.js`** — runs on `npm install` to download (or build) a CUDA-enabled
-   ONNX Runtime Node.js binding into `vendor/`.
+onnxruntime-node CUDA requires CUDA 12 + cuDNN 9. Install them:
 
-2. **`index.js`** — exports `activate()` and `getDevice()`. The `activate()` function
-   verifies that the native binary is present and configures ONNX Runtime to use the
-   CUDA execution provider. `getDevice()` returns `'cuda'` so embedeer passes the
-   correct device string to `@huggingface/transformers` `pipeline()`.
-
----
-
-## Current status (stub)
-
-> ⚠️ The binary download in `install.js` is currently **stubbed** — no real CUDA
-> binary is downloaded yet. GPU execution is not functional until the TODO in
-> `install.js` is implemented.
->
-> See `install.js` for the full TODO list and skeleton download code.
-
-### What needs to be done
-
-1. Build a CUDA-enabled `onnxruntime-node` binding:
-   ```bash
-   # Clone ORT
-   git clone --recursive https://github.com/microsoft/onnxruntime
-   cd onnxruntime
-   # Build with CUDA
-   ./build.sh --config Release --build_nodejs --use_cuda \
-     --cuda_home /usr/local/cuda \
-     --cudnn_home /usr/local/cuda
-   ```
-
-2. Upload the resulting `.node` file as a GitHub Release asset.
-
-3. Update `install.js` to download and verify the binary.
-
-4. Update `index.js` to wire the binary into ONNX Runtime's module resolution.
-
----
-
-## Platform
-
-| Platform | Architecture | Provider | Package |
-|----------|-------------|----------|---------|
-| Linux    | x64          | CUDA     | `@embedeer/ort-linux-x64-cuda` ← **this package** |
-| Windows  | x64          | CUDA     | `@embedeer/ort-win32-x64-cuda` |
-| Windows  | x64          | DirectML | `@embedeer/ort-win32-x64-dml`  |
+  # Option A — CUDA 12 + cuDNN 9 via apt (Ubuntu/Debian)
+  sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
+  ...
+```

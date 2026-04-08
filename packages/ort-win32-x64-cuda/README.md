@@ -1,26 +1,23 @@
 # @embedeer/ort-win32-x64-cuda
 
-CUDA execution provider for [embedeer](https://github.com/jsilvanus/embedeer) on **Windows x64**.
+> ⚠️ **Not yet available** — CUDA on Windows is not included in `onnxruntime-node` prebuilt binaries.
 
-Install this package alongside `embedeer` to enable GPU-accelerated embeddings using NVIDIA CUDA on Windows.
+This package is a placeholder for future Windows CUDA support.
 
-## Installation
+## Use DirectML instead
 
-```bash
-npm install embedeer
-npm install @embedeer/ort-win32-x64-cuda
-```
-
-## Usage
-
-```js
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { device: 'gpu' });
-```
+For GPU acceleration on Windows, use DirectML — it supports NVIDIA, AMD, and Intel GPUs without CUDA:
 
 ```bash
-npx embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello"
+npm install @embedeer/ort-win32-x64-dml
 ```
 
-> ⚠️ **Stub** — binary download not yet implemented. See `install.js` for TODO.
+See [`@embedeer/ort-win32-x64-dml`](../ort-win32-x64-dml/README.md) for full documentation.
 
-See [packages/ort-linux-x64-cuda/README.md](../ort-linux-x64-cuda/README.md) for full documentation.
+## Why CUDA isn't available on Windows
+
+`onnxruntime-node` prebuilt binaries include CUDA support on **Linux x64** only (CUDA 12 + cuDNN 9). Windows CUDA support would require either:
+- A future official ONNX Runtime release with Windows CUDA prebuilts
+- A custom `onnxruntime-node` build against CUDA on Windows
+
+See [ONNX Runtime build docs](https://onnxruntime.ai/docs/build/inferencing.html) if you need Windows CUDA.

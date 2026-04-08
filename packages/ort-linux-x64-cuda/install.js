@@ -1,94 +1,104 @@
 /**
- * Install script for @embedeer/ort-linux-x64-cuda
+ * Install / post-install check for @embedeer/ort-linux-x64-cuda
  *
- * Downloads (or builds) a CUDA-enabled ONNX Runtime Node.js binding for
- * Linux x64 and places it under vendor/ so the package can activate it at
- * runtime.
+ * onnxruntime-node v1.14+ ships libonnxruntime_providers_cuda.so on Linux x64.
+ * No additional binary download is required. This script just verifies that
+ * the necessary CUDA 12 system libraries are present, and prints actionable
+ * install instructions if they are not.
  *
- * This script runs automatically via the "install" lifecycle hook:
- *   npm install @embedeer/ort-linux-x64-cuda
- *
- * ── Current status ────────────────────────────────────────────────────────
- * STUB — the actual binary download / build is not yet implemented.
- * The structure and hooks are in place; see the TODOs below.
- * ─────────────────────────────────────────────────────────────────────────
- *
- * Expected artifact layout after install:
- *   packages/ort-linux-x64-cuda/
- *   └── vendor/
- *       ├── onnxruntime_binding.node   ← CUDA-enabled ORT Node binding
- *       └── libonnxruntime_providers_cuda.so  ← shared lib (may be bundled in .node)
- *
- * TODO:
- *   1. Build or obtain a CUDA-enabled onnxruntime-node binding.
- *      Options:
- *        (a) Build from source: https://onnxruntime.ai/docs/build/inferencing.html
- *            cmake flags: --use_cuda --cuda_home /usr/local/cuda
- *        (b) Download a prebuilt binary from a GitHub Release in this repo.
- *            See: https://github.com/jsilvanus/embedeer/releases
- *   2. Upload the binary as a GitHub Release asset tagged by version + platform.
- *   3. Replace the stub below with actual download logic using the fetch API
- *      (or the 'node-fetch' package for older Node versions).
- *   4. Verify the binary checksum (SHA-256) before using it.
- *
- * CUDA compatibility:
- *   The binary must be compiled against the same CUDA major version as the
- *   host system (e.g. CUDA 12.x). Consider publishing multiple binaries:
- *     ort-linux-x64-cuda12, ort-linux-x64-cuda11, etc.
- *
- * onnxruntime version:
- *   Must match the version that @huggingface/transformers depends on.
- *   Check: node -e "require('onnxruntime-node/package.json').version"
+ * System requirements verified here:
+ *   - NVIDIA GPU with CUDA 12-compatible driver (≥ 525)
+ *   - CUDA 12 Toolkit:   libcudart.so.12, libcublas.so.12, libcublasLt.so.12,
+ *                        libcurand.so.10, libcufft.so.11
+ *   - cuDNN 9:           libcudnn.so.9
  */
 
-import { mkdirSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const VENDOR_DIR = join(__dirname, 'vendor');
-
-// Only run on Linux x64; other platforms should not have installed this package,
-// but guard anyway.
 if (process.platform !== 'linux' || process.arch !== 'x64') {
   console.warn(
-    `[embedeer] @embedeer/ort-linux-x64-cuda: skipping install on ${process.platform}/${process.arch}`,
+    `[embedeer] @embedeer/ort-linux-x64-cuda: skipping checks on ${process.platform}/${process.arch} (this package is for Linux x64 only)`,
   );
   process.exit(0);
 }
 
-console.log('[embedeer] @embedeer/ort-linux-x64-cuda: running install script...');
+console.log('[embedeer] @embedeer/ort-linux-x64-cuda: checking system CUDA requirements...');
 
-mkdirSync(VENDOR_DIR, { recursive: true });
+const REQUIRED_LIBS = [
+  'libcudart.so.12',
+  'libcublas.so.12',
+  'libcublasLt.so.12',
+  'libcurand.so.10',
+  'libcufft.so.11',
+  'libcudnn.so.9',
+];
 
-// ── TODO: replace this stub with real binary download ─────────────────────
-//
-// Example skeleton for a real download (requires Node 18+ built-in fetch):
-//
-//   const VERSION = '1.0.0';
-//   const BASE_URL = `https://github.com/jsilvanus/embedeer/releases/download/ort-linux-x64-cuda-${VERSION}`;
-//   const BINARY_NAME = 'onnxruntime_binding.node';
-//   const CHECKSUM_NAME = 'onnxruntime_binding.node.sha256';
-//
-//   const res = await fetch(`${BASE_URL}/${BINARY_NAME}`);
-//   if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-//   const buf = Buffer.from(await res.arrayBuffer());
-//
-//   // TODO: verify SHA-256 checksum here
-//
-//   writeFileSync(join(VENDOR_DIR, BINARY_NAME), buf);
-//   console.log(`[embedeer] Installed CUDA ORT binding → ${join(VENDOR_DIR, BINARY_NAME)}`);
-// ──────────────────────────────────────────────────────────────────────────
+const CUDA_SEARCH_DIRS = [
+  '/usr/local/cuda/lib64',
+  '/usr/local/cuda-12/lib64',
+  '/usr/lib/x86_64-linux-gnu',
+  '/usr/lib64',
+  ...(process.env.LD_LIBRARY_PATH ?? '').split(':').filter(Boolean),
+];
 
-// For now write a placeholder so the package directory is not empty.
-writeFileSync(
-  join(VENDOR_DIR, 'README.txt'),
-  'This directory will contain the CUDA-enabled ONNX Runtime native binding.\n' +
-  'See packages/ort-linux-x64-cuda/install.js for the download TODO.\n',
-);
+function findLib(libName) {
+  for (const dir of CUDA_SEARCH_DIRS) {
+    if (existsSync(`${dir}/${libName}`)) return `${dir}/${libName}`;
+  }
+  try {
+    const output = execSync('ldconfig -p', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+    for (const line of output.split('\n')) {
+      if (line.includes(libName) && line.includes('=>')) {
+        const match = line.match(/=>\s*(.+)/);
+        if (match) return match[1].trim();
+      }
+    }
+  } catch { /* ldconfig not available */ }
+  return null;
+}
 
-console.warn(
-  '[embedeer] @embedeer/ort-linux-x64-cuda: STUB install complete. ' +
-  'No real CUDA binary was downloaded yet — GPU execution is not available. ' +
-  'See packages/ort-linux-x64-cuda/install.js for the implementation TODO.',
+// Check NVIDIA GPU / driver
+const hasGpu = existsSync('/dev/nvidiactl');
+if (!hasGpu) {
+  console.warn(
+    '\n[embedeer] WARNING: No NVIDIA GPU detected (/dev/nvidiactl not found).\n' +
+    '  @embedeer/ort-linux-x64-cuda requires an NVIDIA GPU with CUDA 12 drivers.\n' +
+    '  GPU acceleration will not be available until drivers are installed.\n',
+  );
+} else {
+  console.log('[embedeer] ✓ NVIDIA GPU detected');
+}
+
+// Check CUDA libraries
+const missing = REQUIRED_LIBS.filter((lib) => findLib(lib) === null);
+const found = REQUIRED_LIBS.filter((lib) => findLib(lib) !== null);
+
+for (const lib of found) {
+  console.log(`[embedeer] ✓ ${lib}`);
+}
+
+if (missing.length > 0) {
+  console.warn(
+    `\n[embedeer] WARNING: Missing CUDA system libraries: ${missing.join(', ')}\n\n` +
+    '  onnxruntime-node CUDA EP requires CUDA 12 + cuDNN 9.\n\n' +
+    '  Install on Ubuntu/Debian:\n' +
+    '    sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12\n\n' +
+    '  Or download from NVIDIA:\n' +
+    '    https://developer.nvidia.com/cuda-downloads\n' +
+    '    https://developer.nvidia.com/cudnn-downloads\n\n' +
+    '  After installing, if libraries are not on the default path:\n' +
+    '    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH\n',
+  );
+  // Exit 0 so npm install doesn't fail — the user may install CUDA later.
+  process.exit(0);
+}
+
+console.log(
+  '\n[embedeer] @embedeer/ort-linux-x64-cuda: all CUDA requirements satisfied.\n' +
+  '  GPU acceleration is available. Use device="gpu" or device="auto" in embedeer.\n',
 );
