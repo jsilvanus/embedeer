@@ -33,6 +33,8 @@ export class WorkerPool {
    * @param {string}   [options.token]              Hugging Face API token (overrides HF_TOKEN env var)
    * @param {string}   [options.dtype]              Quantization dtype ('fp32'|'fp16'|'q8'|'q4'|'q4f16'|'auto')
    * @param {string}   [options.cacheDir]           Custom model cache directory
+   * @param {string}   [options.device]             Compute device: 'auto'|'cpu'|'gpu' (default: 'cpu')
+   * @param {string}   [options.provider]           Execution provider override: 'cpu'|'cuda'|'dml'
    * @param {Function} [options._WorkerClass]       Override worker class (for testing)
    */
   constructor(modelName, {
@@ -43,6 +45,8 @@ export class WorkerPool {
     token,
     dtype,
     cacheDir,
+    device,
+    provider,
     _WorkerClass,
   } = {}) {
     this.modelName = modelName;
@@ -53,6 +57,8 @@ export class WorkerPool {
     this.token = token;
     this.dtype = dtype;
     this.cacheDir = cacheDir;
+    this.device = device;
+    this.provider = provider;
 
     // Pick defaults based on mode; can be overridden for testing.
     if (_WorkerClass) {
@@ -148,6 +154,8 @@ export class WorkerPool {
         token: this.token,
         dtype: this.dtype,
         cacheDir: this.cacheDir,
+        device: this.device,
+        provider: this.provider,
       },
     });
 

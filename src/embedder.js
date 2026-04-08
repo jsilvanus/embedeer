@@ -29,6 +29,8 @@ export class Embedder {
    * @param {string} [options.token]             Hugging Face API token (overrides HF_TOKEN env)
    * @param {string} [options.dtype]             Quantization dtype ('fp32'|'fp16'|'q8'|'q4'|'q4f16'|'auto')
    * @param {string} [options.cacheDir]          Custom model cache directory
+   * @param {string} [options.device]            Compute device: 'auto'|'cpu'|'gpu' (default: 'cpu')
+   * @param {string} [options.provider]          Execution provider override: 'cpu'|'cuda'|'dml'
    */
   constructor(modelName = 'Xenova/all-MiniLM-L6-v2', options = {}) {
     this.modelName = modelName;
@@ -41,6 +43,8 @@ export class Embedder {
       token: options.token,
       dtype: options.dtype,
       cacheDir: options.cacheDir ?? getCacheDir(),
+      device: options.device,
+      provider: options.provider,
     });
   }
 
