@@ -31,3 +31,6 @@ export async function loadModel(modelName, options) {
   const { Embedder } = await import('./embedder.js');
   return Embedder.loadModel(modelName, options);
 }
+
+// Model management helpers (convenience API)
+export { isModelDownloaded, listModels, downloadModel, prepareModel, ensureModel } from './model-management.js'
