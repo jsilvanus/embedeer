@@ -1,267 +1,424 @@
 # embedeer
 
 A Node.js tool for generating text embeddings using models from [Hugging Face](https://huggingface.co/models).  
-Supports **batched** input, **parallel** execution, optional **GPU acceleration** (CUDA / DirectML), quantization, and Hugging Face auth.
-
-This repository is a **monorepo** managed with npm workspaces.
+Supports **batched** input, **parallel** execution, isolated **child-process** workers (default) or **in-process threads**, quantization, optional GPU acceleration, and Hugging Face auth.
 
 ---
 
-## Packages
+## Features
 
-| Package | Description |
-|---------|-------------|
-| [`@jsilvanus/embedeer`](packages/embedeer) | Main embeddings package (CPU + optional GPU) |
-| [`@jsilvanus/embedeer-ort-linux-x64-cuda`](packages/ort-linux-x64-cuda) | CUDA provider for Linux x64 |
-| [`@jsilvanus/embedeer-ort-win32-x64-dml`](packages/ort-win32-x64-dml)   | DirectML provider for Windows x64 |
+- Downloads any Hugging Face feature-extraction model on first use (cached in `~/.embedeer/models`)
+- **Isolated processes** (default) — a worker crash cannot bring down the caller
+- **In-process threads** — opt-in via `mode: 'thread'` for lower overhead
+- **Sequential** execution when `concurrency: 1`
+- Configurable batch size and concurrency
+- **GPU acceleration** — optional CUDA (Linux x64) and DirectML (Windows x64), no extra packages needed
+- Hugging Face API token support (`--token` / `HF_TOKEN` env var)
+- Quantization via `dtype` (`fp32` · `fp16` · `q8` · `q4` · `q4f16` · `auto`)
+- Rich CLI: pull model, embed from file, dump output as JSON / TXT / SQL
 
 ---
 
-## Quick Start
-
-### CPU (default, works everywhere)
+## Installation
 
 ```bash
 npm install @jsilvanus/embedeer
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello world"
 ```
 
-```js
-import { Embedder } from '@jsilvanus/embedeer';
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2');
-const vectors = await embedder.embed(['Hello', 'World']);
-await embedder.destroy();
-```
+GPU acceleration (CUDA on Linux x64, DirectML on Windows x64) is built into `onnxruntime-node`
+which ships as a transitive dependency. No additional packages are required.
 
-### GPU — use CUDA where available (auto-detect)
-
-Add the provider package for your platform, then pass `--device auto`.  
-`auto` tries CUDA on Linux and DirectML on Windows; silently falls back to CPU if no GPU is found.
-
-**Linux x64 (NVIDIA CUDA):**
+**For CUDA on Linux x64** you also need the CUDA 12 system libraries:
 
 ```bash
-# Install CUDA 12 + cuDNN 9 system libraries (Ubuntu/Debian)
+# Ubuntu / Debian
 sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
-
-npm install @jsilvanus/embedeer
-npm install @jsilvanus/embedeer-ort-linux-x64-cuda
-
-# Auto-detect: uses CUDA on this system, CPU on any other
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
-
-# Or require GPU (throws if CUDA is unavailable):
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
-```
-
-**Windows x64 (DirectML — any GPU: NVIDIA / AMD / Intel):**
-
-```bash
-npm install @jsilvanus/embedeer
-npm install @jsilvanus/embedeer-ort-win32-x64-dml
-
-# Auto-detect: uses DirectML on Windows, CPU elsewhere
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
 ```
 
 ---
 
-## GPU — Two-Step Install
+## Programmatic API
 
-### Linux x64 + NVIDIA CUDA (GPU MVP)
-
-**System requirements:** NVIDIA GPU + driver ≥ 525, CUDA 12, cuDNN 9
-
-`onnxruntime-node` v1.24.x ships `libonnxruntime_providers_cuda.so` on Linux x64. No custom binary needed — just install CUDA 12 + cuDNN 9 system libraries and the npm package:
-
-```bash
-# Install CUDA 12 + cuDNN 9 (Ubuntu/Debian)
-sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
-
-# Install embedeer and the CUDA provider package
-npm install @jsilvanus/embedeer
-npm install @jsilvanus/embedeer-ort-linux-x64-cuda
-
-# Run with GPU
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
-```
-
-### Docker + NVIDIA CUDA
-
-Use an [NVIDIA CUDA Docker image](https://hub.docker.com/r/nvidia/cuda) as your base — it ships all required CUDA 12 + cuDNN 9 libraries, so no manual `apt install` is needed in your Dockerfile.
-
-**Requirements on the host:**
-- NVIDIA GPU driver ≥ 525
-- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed
-
-**Example `Dockerfile`:**
-
-```dockerfile
-# CUDA 12 + cuDNN 9 runtime — all required libs are pre-installed
-FROM nvidia/cuda:12.6.3-cudnn9-runtime-ubuntu24.04
-
-WORKDIR /app
-
-# Install Node.js (e.g. via NodeSource)
-RUN apt-get update && apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install embedeer + CUDA provider
-COPY package.json ./
-RUN npm install @jsilvanus/embedeer && \
-    npm install @jsilvanus/embedeer-ort-linux-x64-cuda
-
-COPY . .
-```
-
-**Build and run:**
-
-```bash
-docker build -t my-embedeer-app .
-
-# --gpus all enables NVIDIA GPU access inside the container
-docker run --rm --gpus all my-embedeer-app \
-  npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
-```
-
-**docker-compose:**
-
-```yaml
-services:
-  embedeer:
-    build: .
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    command: >
-      npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
-                   --device gpu
-                   --data "Hello GPU"
-```
-
-### Windows x64 + DirectML (any GPU)
-
-**System requirements:** Windows 10 (1903+) or 11, any DirectX 12 GPU, up-to-date drivers
-
-```bash
-npm install @jsilvanus/embedeer
-npm install @jsilvanus/embedeer-ort-win32-x64-dml
-
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
-```
-
-### GPU API options
+### Embed texts (CPU — default)
 
 ```js
 import { Embedder } from '@jsilvanus/embedeer';
 
-// Auto-detect GPU, silent CPU fallback if unavailable
-const e1 = await Embedder.create(model, { device: 'auto' });
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  batchSize:   32,          // texts per worker task   (default: 32)
+  concurrency: 2,           // parallel workers        (default: 2)
+  mode:       'process',    // 'process' | 'thread'    (default: 'process')
+  pooling:    'mean',       // 'mean' | 'cls' | 'none' (default: 'mean')
+  normalize:   true,        // L2-normalise vectors    (default: true)
+  token:      'hf_...',     // HF API token (optional; also reads HF_TOKEN env)
+  dtype:      'q8',         // quantization dtype      (optional)
+  cacheDir:   '/my/cache',  // override model cache    (default: ~/.embedeer/models)
+});
 
-// Require GPU — throws if no GPU provider is available
-const e2 = await Embedder.create(model, { device: 'gpu' });
+const vectors = await embedder.embed(['Hello world', 'Foo bar baz']);
+// → number[][]  (one 384-dim vector per text for all-MiniLM-L6-v2)
 
-// Explicit provider
-const e3 = await Embedder.create(model, { provider: 'cuda' }); // Linux CUDA
-const e4 = await Embedder.create(model, { provider: 'dml' });  // Windows DirectML
+await embedder.destroy(); // shut down worker processes
 ```
 
-```bash
-npx @jsilvanus/embedeer --device auto    # try GPU, fall back to CPU
-npx @jsilvanus/embedeer --device gpu     # require GPU
-npx @jsilvanus/embedeer --provider cuda  # explicit CUDA (Linux)
-npx @jsilvanus/embedeer --provider dml   # explicit DirectML (Windows)
+### Embed texts with GPU
+
+```js
+import { Embedder } from '@jsilvanus/embedeer';
+
+// Auto-detect GPU (falls back to CPU if no provider is installed)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  device: 'auto',
+});
+
+// Require GPU (throws if no provider is available)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  device: 'gpu',
+});
+
+// Explicitly select an execution provider
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  provider: 'cuda',  // 'cuda' | 'dml'
+});
+```
+
+### Pull (pre-cache) a model
+
+Like `ollama pull` — downloads the model once so workers start instantly:
+
+```js
+import { loadModel } from '@jsilvanus/embedeer';
+
+const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
+  token: 'hf_...',   // optional
+  dtype: 'q8',       // optional
+});
 ```
 
 ---
 
-## Input & Output
+## CLI
 
-Full reference: [`packages/embedeer/README.md`](packages/embedeer/README.md#input-sources)
+```
+npx @jsilvanus/embedeer [options]
 
-### Quick piping examples
+Model management (pull / cache model):
+  npx @jsilvanus/embedeer --model <name>
+
+Embed texts (batch):
+  npx @jsilvanus/embedeer --model <name> --data "text1" "text2" ...
+  npx @jsilvanus/embedeer --model <name> --data '["text1","text2"]'
+  npx @jsilvanus/embedeer --model <name> --file texts.txt
+  echo '["t1","t2"]' | npx @jsilvanus/embedeer --model <name>
+  printf 'a\0b\0c' | npx @jsilvanus/embedeer --model <name> --delimiter '\0'
+
+Interactive / streaming line-reader:
+  npx @jsilvanus/embedeer --model <name> --interactive --dump out.jsonl
+  cat big.txt | npx @jsilvanus/embedeer --model <name> -i --output csv --dump out.csv
+
+Options:
+  -m, --model <name>           Hugging Face model (default: Xenova/all-MiniLM-L6-v2)
+  -d, --data <text...>         Text(s) or JSON array to embed
+      --file <path>            Input file: JSON array or delimited texts
+  -D, --delimiter <str>        Record separator for stdin/file (default: \n)
+                               Escape sequences supported: \0 \n \t \r
+  -i, --interactive            Interactive line-reader (see below)
+      --dump <path>            Write output to file instead of stdout
+      --output <format>        Output: json|jsonl|csv|txt|sql (default: json)
+      --with-text              Include source text alongside each embedding
+  -b, --batch-size <n>         Texts per worker batch (default: 32)
+  -c, --concurrency <n>        Parallel workers (default: 2)
+      --mode process|thread    Worker mode (default: process)
+  -p, --pooling <mode>         mean|cls|none (default: mean)
+      --no-normalize           Disable L2 normalisation
+      --dtype <type>           Quantization: fp32|fp16|q8|q4|q4f16|auto
+      --token <tok>            Hugging Face API token (or set HF_TOKEN env)
+      --cache-dir <path>       Model cache directory (default: ~/.embedeer/models)
+      --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
+      --provider <name>        Execution provider override: cpu|cuda|dml
+  -h, --help                   Show this help
+```
+
+---
+
+## Input Sources
+
+Texts can be provided in any of these ways (checked in order):
+
+| Source | How |
+|--------|-----|
+| Inline args | `--data "text1" "text2" "text3"` |
+| Inline JSON | `--data '["text1","text2"]'` |
+| File | `--file texts.txt` (JSON array or one record per line) |
+| Stdin | Pipe or redirect — auto-detected; TTY is skipped |
+| Interactive | `--interactive` / `-i` — line-reader, embeds as you type |
+
+**Stdin auto-detection:** when `stdin` is not a TTY (i.e. data is piped or redirected), embedeer reads it before deciding what to do. JSON arrays are accepted directly; otherwise records are split on the delimiter.
+
+---
+
+## Interactive Line-Reader Mode (`-i` / `--interactive`)
+
+The interactive mode opens a line-by-line reader that starts embedding as records arrive — ideal for pasting large datasets into a terminal or streaming data from another process.
+
+```bash
+# Open an interactive session (paste lines, Ctrl+D when done)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --interactive --dump embeddings.jsonl
+
+# Stream a large file through interactive mode with CSV output
+cat big.txt | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 \
+  --interactive --output csv --dump embeddings.csv
+
+# Interactive with GPU, custom batch size, txt output
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 \
+  --interactive --device auto --batch-size 16 --output txt --dump vecs.txt
+```
+
+**How it works:**
+
+| Event | What happens |
+|-------|-------------|
+| Type a line, press Enter | Record is buffered |
+| Buffer reaches `--batch-size` | Auto-flush: embed + append to output |
+| Type an empty line | Manual flush: embed whatever is buffered |
+| Ctrl+D (EOF) | Flush remaining records and exit |
+| Ctrl+C | Flush remaining records and exit |
+
+**Behaviour notes:**
+
+- Progress messages (`Batch N: M record(s) → file`) always go to **stderr** — they never pollute piped output.
+- When stdin is a TTY, a `> ` prompt is shown on stderr.
+- Output defaults to **stdout** if `--dump` is omitted; a tip is printed when running in TTY mode.
+- `--output json` and `--output sql` are automatically promoted to `jsonl` since they produce complete documents that cannot be appended to incrementally.
+- `--output csv` writes the dimension header (`text,dim_0,dim_1,...`) on the first batch only; subsequent batches append data rows.
+- Each interactive session **clears** the `--dump` file on start so you always get a fresh output file.
+
+### Configurable delimiter (`-D` / `--delimiter`)
+
+By default records in stdin and files are split on newline (`\n`). Use `--delimiter` to change it:
+
+```bash
+# Newline-delimited (default)
+printf 'Hello\nWorld\n' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
+
+# Null-byte delimited — safe with filenames/texts that contain newlines
+printf 'Hello\0World\0' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '\0'
+
+# Tab-delimited
+printf 'Hello\tWorld' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '\t'
+
+# Custom multi-character delimiter
+printf 'Hello|||World|||Foo' | npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '|||'
+
+# File with null-byte delimiter
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --file records.bin --delimiter '\0'
+
+# Integrate with find -print0 (handles filenames with spaces / newlines)
+find ./docs -name '*.txt' -print0 | \
+  xargs -0 cat | \
+  npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --delimiter '\0'
+```
+
+Supported escape sequences in `--delimiter`:
+
+| Sequence | Character |
+|----------|-----------|
+| `\0` | Null byte (U+0000) |
+| `\n` | Newline (U+000A) |
+| `\t` | Tab (U+0009) |
+| `\r` | Carriage return (U+000D) |
+
+---
+
+## Output Formats
+
+| Format | Description |
+|--------|-------------|
+| `json` (default) | JSON array of float arrays: `[[0.1,0.2,...],[...]]` |
+| `json --with-text` | JSON array of objects: `[{"text":"...","embedding":[...]}]` |
+| `jsonl` | Newline-delimited JSON, one object per line: `{"text":"...","embedding":[...]}` |
+| `csv` | CSV with header: `text,dim_0,dim_1,...,dim_N` |
+| `txt` | Space-separated floats, one vector per line |
+| `txt --with-text` | Tab-separated: `<original text>\t<float float ...>` |
+| `sql` | `INSERT INTO embeddings (text, vector) VALUES ...;` |
+
+Use `--dump <path>` to write the output to a file instead of stdout. Progress messages always go to stderr so they never interfere with piped output.
+
+### Piping examples
 
 ```bash
 MODEL=Xenova/all-MiniLM-L6-v2
 
-# Pipe any text — newline-delimited by default
-printf 'Hello\nWorld\n' | npx @jsilvanus/embedeer --model $MODEL
+# --- json (default) ---
+# Embed and pretty-print with jq
+echo '["Hello","World"]' | npx @jsilvanus/embedeer --model $MODEL | jq '.[0] | length'
 
-# JSON array on stdin
-echo '["cat","dog","fish"]' | npx @jsilvanus/embedeer --model $MODEL
+# --- jsonl ---
+# One object per line — pipe to jq, grep, awk, etc.
+npx @jsilvanus/embedeer --model $MODEL --data "foo" "bar" --output jsonl
 
-# Null-byte delimiter (safe with text containing newlines)
-printf 'Hello\0World\0' | npx @jsilvanus/embedeer --model $MODEL --delimiter '\0'
+# Filter by similarity: extract embedding for downstream processing
+npx @jsilvanus/embedeer --model $MODEL --data "query text" --output jsonl \
+  | jq -c '.embedding'
 
-# JSONL output — one {"text":...,"embedding":[...]} per line, great for jq / grep
-npx @jsilvanus/embedeer --model $MODEL --output jsonl --data "foo" "bar"
+# Stream a large file and store as JSONL
+npx @jsilvanus/embedeer --model $MODEL --file big.txt --output jsonl --dump out.jsonl
 
-# Include source text in JSON output
-npx @jsilvanus/embedeer --model $MODEL --output json --with-text --data "foo" "bar"
+# --- json --with-text ---
+# Keep the source text next to each vector (useful for building a search index)
+npx @jsilvanus/embedeer --model $MODEL --output json --with-text \
+  --data "cat" "dog" "fish" \
+  | jq '.[] | {text, dims: (.embedding | length)}'
 
-# CSV output for pandas / Excel
+# --- csv ---
+# Embed then open in Python/pandas
 npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output csv --dump vectors.csv
+python3 -c "import pandas as pd; df = pd.read_csv('vectors.csv'); print(df.shape)"
 
-# SQL INSERT statements
+# --- txt ---
+# Raw floats — useful for awk/paste/numpy text loading
+npx @jsilvanus/embedeer --model $MODEL --data "Hello" "World" --output txt \
+  | awk '{print NF, "dimensions"}'
+
+# txt --with-text: original text + tab + floats, easy to parse
+npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output txt --with-text \
+  | while IFS=$'\t' read -r text vec; do echo "TEXT: $text"; done
+
+# --- sql ---
+# Generate INSERT statements for a vector DB or SQLite
 npx @jsilvanus/embedeer --model $MODEL --file texts.txt --output sql --dump inserts.sql
+sqlite3 mydb.sqlite < inserts.sql
 
-# Tab-separated floats (txt), with original text prepended
-npx @jsilvanus/embedeer --model $MODEL --output txt --with-text --data "hello" "world"
+# --- Chaining with other tools ---
+# Embed stdin from another command
+cat docs/*.txt | npx @jsilvanus/embedeer --model $MODEL --output jsonl > embeddings.jsonl
+
+# Null-byte input from find (handles any filename or text with newlines)
+find ./corpus -name '*.txt' -print0 \
+  | xargs -0 cat \
+  | npx @jsilvanus/embedeer --model $MODEL --delimiter '\0' --output jsonl
 ```
 
-### Interactive / streaming line-reader (`-i` / `--interactive`)
+---
 
-Paste records one per line and get embeddings as soon as each batch fills (or when you press Enter on an empty line to flush manually). Ideal for interactive use or streaming large datasets through a pipeline.
+### CLI Examples
 
 ```bash
-MODEL=Xenova/all-MiniLM-L6-v2
+# Pull a model (like ollama pull)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
 
-# Interactive terminal session — paste lines, Ctrl+D when done
-npx @jsilvanus/embedeer --model $MODEL --interactive --dump embeddings.jsonl
+# Embed a few strings, output JSON (CPU)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --data "Hello" "World"
 
-# Stream a large file in batches (auto-flushes every 32 lines)
-cat corpus.txt | npx @jsilvanus/embedeer --model $MODEL -i --output csv --dump out.csv
+# Auto-detect GPU, fall back to CPU if unavailable
+# (uses CUDA on Linux, DirectML on Windows, CPU everywhere else)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
 
-# GPU-accelerated interactive mode
-npx @jsilvanus/embedeer --model $MODEL --interactive --device auto \
-  --batch-size 64 --output jsonl --dump out.jsonl
+# Require GPU (throws with install instructions if no provider found)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+
+# Explicit CUDA (Linux x64 — requires CUDA 12 system libraries)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
+
+# Explicit DirectML (Windows x64)
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
+
+# Embed from a file, dump SQL to disk
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 \
+  --file texts.txt --output sql --dump out.sql
+
+# Use quantized model, in-process threads, private model with token
+npx @jsilvanus/embedeer --model my-org/private-model \
+  --token hf_xxx --dtype q8 --mode thread \
+  --data "embed me"
 ```
 
-**Flushing:** batch fills to `--batch-size` (auto) or empty line (manual). Ctrl+D finishes. Ctrl+C aborts.  
-**Output:** progress messages go to stderr; embeddings go to `--dump` file or stdout.  
-**csv** writes the header on the first batch only. **json**/**sql** are promoted to **jsonl** automatically.
-
 ---
 
-## Provider Selection Logic
+### Using GPU
 
-| Platform | `device='auto'` or `device='gpu'` order |
-|----------|-----------------------------------------|
-| Linux x64 | CUDA → (CPU fallback) |
-| Windows x64 | CUDA → DirectML → (CPU fallback) |
-| Other | CPU only |
+No additional packages are needed — `onnxruntime-node` (installed with `@jsilvanus/embedeer`) already
+bundles the CUDA provider on Linux x64 and DirectML on Windows x64.
 
-For `device='auto'`: silently falls back to CPU if no GPU provider is available.  
-For `device='gpu'`: throws with a clear error and install instructions.  
-For explicit `--provider cuda/dml`: throws if libraries are missing, with install instructions.
-
----
-
-## Monorepo Development
+**Linux x64 — NVIDIA CUDA:**
 
 ```bash
-npm install       # install all workspace packages
-npm test          # run tests (packages/embedeer)
+# One-time: install CUDA 12 system libraries (Ubuntu/Debian)
+sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
+
+# Auto-detect: uses CUDA here, CPU fallback on any other machine
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
+
+# Hard-require CUDA (throws with diagnostic error if unavailable):
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu --data "Hello GPU"
+
+# Explicit CUDA provider:
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider cuda --data "Hello CUDA"
+```
+
+**Windows x64 — DirectML (any GPU: NVIDIA / AMD / Intel):**
+
+```bash
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device auto --data "Hello"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --device gpu  --data "Hello GPU"
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2 --provider dml --data "Hello DML"
 ```
 
 ---
 
-## Documentation
+## GPU Acceleration
 
-Full API documentation, CLI reference, and all options: [`packages/embedeer/README.md`](packages/embedeer/README.md)
+GPU support is built into `onnxruntime-node` (a dependency of `@huggingface/transformers`):
+
+| Platform       | Provider  | Requirement                                            |
+|----------------|-----------|--------------------------------------------------------|
+| Linux x64      | CUDA      | NVIDIA GPU + driver ≥ 525, CUDA 12 toolkit, cuDNN 9   |
+| Windows x64    | DirectML  | Any DirectX 12 GPU (most GPUs since 2016), Windows 10+ |
+
+### Provider selection logic
+
+| `device` | `provider` | Behavior |
+|----------|-----------|----------|
+| `cpu` (default) | — | Always CPU |
+| `auto` | — | Try GPU providers for the platform in order; silent CPU fallback |
+| `gpu` | — | Try GPU providers; **throw** if none available |
+| any | `cuda` | Load CUDA provider; **throw** if not available or not supported |
+| any | `dml` | Load DirectML provider; **throw** if not available or not supported |
+| any | `cpu` | Always CPU |
+
+On Linux x64: GPU order is `cuda`.  
+On Windows x64: GPU order is `cuda → dml`.
+
+---
+
+## How it works
+
+```
+embed(texts)
+  │
+  ├─ split into batches of batchSize
+  │
+  └─ Promise.all(batches) ──► WorkerPool
+                                 │
+                                 ├─ [process mode] ChildProcessWorker 0
+                                 │   resolveProvider(device, provider)
+                                 │   → pipeline('feature-extraction', model, { device: 'cuda' })
+                                 │   → embed batch A
+                                 │
+                                 └─ [process mode] ChildProcessWorker 1
+                                     resolveProvider(device, provider)
+                                     → pipeline(...) → embed batch B
+```
+
+Workers load the model **once** at startup and reuse it for all batches.  
+Provider activation happens per-worker before the pipeline is created.
+
+---
+
+## Testing
+
+```bash
+npm test
+```
+
+Tests use Node's built-in `node:test` runner. No real model download required.
