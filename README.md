@@ -1,6 +1,8 @@
 # embedeer
 
-[![npm version](https://img.shields.io/npm/v/lcyt.svg)](https://www.npmjs.com/package/@jsilvanus/embedeer)
+## Node.js Embedding Tool
+
+[![npm version](https://img.shields.io/npm/v/@jsilvanus/embedeer.svg)](https://www.npmjs.com/package/@jsilvanus/embedeer)
 
 A Node.js tool for generating text embeddings using models from [Hugging Face](https://huggingface.co/models).  
 Supports **batched** input, **parallel** execution, isolated **child-process** workers (default) or **in-process threads**, quantization, optional GPU acceleration, and Hugging Face auth.
