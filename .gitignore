@@ -1,3 +1,17 @@
+#Ignore NPM modules etc.
 node_modules/
-.env
+
+# Ignore build output
+dist/
+
+# Ignore PNPM files
+.pnpm*
+
+# Ignore VSCode settings
+.vscode/
+
+#ignore log files
 *.log
+
+# Ignore environment variables
+.env
