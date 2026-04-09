@@ -33,7 +33,10 @@ export async function loadModel(modelName, options) {
 }
 
 // Model management helpers (convenience API)
-export { isModelDownloaded, listModels, downloadModel, prepareModel, ensureModel } from './model-management.js'
+export { isModelDownloaded, listModels, downloadModel, prepareModel, ensureModel, deleteModel, getCachedModels } from './model-management.js'
+
+// Runtime: models currently loaded into worker pools
+export { getLoadedModels } from './runtime-models.js'
 
 // Provider resolution (used by chattydeer and other packages that build on embedeer)
 export { resolveProvider } from './provider-loader.js'

@@ -83,6 +83,26 @@ Remove-Item -Recurse -Force $env:USERPROFILE\.embedeer\models\Xenova-all-MiniLM-
 
 - Advanced: see `src/model-management.js` for low-level cache helpers.
 
+### Programmatic runtime & cache helpers
+
+Two small runtime/cache helpers are available from the public API:
+
+- `getLoadedModels()` — returns an array of model names currently loaded by active worker pools.
+- `deleteModel(modelName, { cacheDir? })` — remove cached model directories matching `modelName`.
+
+Example:
+
+```js
+import { getLoadedModels, deleteModel } from '@jsilvanus/embedeer';
+
+// Synchronous list of models currently loaded by any running WorkerPool
+console.log(getLoadedModels()); // e.g. ['Xenova/all-MiniLM-L6-v2']
+
+// Remove a cached model from disk (async)
+const removed = await deleteModel('Xenova/all-MiniLM-L6-v2');
+console.log('removed?', removed);
+```
+
 ## Explainer — deterministic LLM interface
 
 This was **deprecated** and moved to npm package [`@jsilvanus/chattydeer`](https://www.npmjs.com/package/@jsilvanus/chattydeer) in 1.3.0.
@@ -163,19 +183,6 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 });
 ```
 
-### Pull (pre-cache) a model
-
-Like `ollama pull` — downloads the model once so workers start instantly:
-
-```js
-import { loadModel } from '@jsilvanus/embedeer';
-
-const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
-  token: 'hf_...',   // optional
-  dtype: 'q8',       // optional
-});
-```
-
 ---
 
 ## CLI
@@ -238,7 +245,7 @@ Texts can be provided in any of these ways (checked in order):
 
 ---
 
-## Interactive Line-Reader Mode (`-i` / `--interactive`)
+### Interactive Line-Reader Mode (`-i` / `--interactive`)
 
 The interactive mode opens a line-by-line reader that starts embedding as records arrive — ideal for pasting large datasets into a terminal or streaming data from another process.
 

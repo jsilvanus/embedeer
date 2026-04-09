@@ -93,5 +93,10 @@ export function listModels(opts?: { cacheDir?: string }): Promise<string[]>;
 export function downloadModel(modelName: string, opts?: { token?: string; dtype?: string; cacheDir?: string }): Promise<{ modelName: string; cacheDir: string } | any>;
 export function prepareModel(modelName: string, opts?: { quantize?: boolean; dtype?: string; cacheDir?: string }): Promise<{ modelName: string; cacheDir: string }>;
 export function ensureModel(modelName: string, opts?: { downloadIfMissing?: boolean; prepare?: boolean; quantize?: boolean; dtype?: string; cacheDir?: string }): Promise<{ modelName: string; cacheDir: string }>;
+export function deleteModel(modelName: string, opts?: { cacheDir?: string }): Promise<boolean>;
+
+// Runtime helpers
+export function getLoadedModels(): string[];
+export function getCachedModels(opts?: { cacheDir?: string }): Promise<Array<{ name: string; path: string; size: number; mtime: string | null }>>;
 
 export function resolveProvider(device?: Device, provider?: Provider): Promise<string | undefined>;

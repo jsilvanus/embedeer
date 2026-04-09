@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { ChildProcessWorker } from './child-process-worker.js';
 import { ThreadWorker } from './thread-worker.js';
+import { registerLoadedModel, unregisterLoadedModel } from './runtime-models.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROCESS_WORKER_PATH = join(__dirname, 'worker.js');
@@ -91,6 +92,7 @@ export class WorkerPool {
     this._workerToTaskId = new Map();
     this._nextId = 0;
     this._initialized = false;
+    this._registered = false;
   }
 
   /**
@@ -111,6 +113,11 @@ export class WorkerPool {
     await Promise.all(readyPromises);
     console.error(`Worker pool initialized — model should be loaded.`);
     this._initialized = true;
+    // Register this model as loaded in the runtime registry.
+    if (!this._registered) {
+      registerLoadedModel(this.modelName);
+      this._registered = true;
+    }
   }
 
   /**
@@ -141,6 +148,10 @@ export class WorkerPool {
     this.taskCallbacks.clear();
     this._workerToTaskId.clear();
     this._initialized = false;
+    if (this._registered) {
+      unregisterLoadedModel(this.modelName);
+      this._registered = false;
+    }
   }
 
   // ── Private ──────────────────────────────────────────────────────────────

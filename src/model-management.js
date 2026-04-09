@@ -54,6 +54,57 @@ export async function listModels(opts = {}) {
 }
 
 /**
+ * Recursively compute total size (bytes) of a directory.
+ * @param {string} p
+ * @returns {Promise<number>}
+ */
+async function _dirSize(p) {
+  let total = 0
+  try {
+    const entries = await fs.promises.readdir(p, { withFileTypes: true })
+    for (const e of entries) {
+      const sub = join(p, e.name)
+      if (e.isFile()) {
+        try {
+          const st = await fs.promises.stat(sub)
+          total += st.size
+        } catch {}
+      } else if (e.isDirectory()) {
+        total += await _dirSize(sub)
+      }
+    }
+  } catch {
+    // ignore and return whatever we've accumulated
+  }
+  return total
+}
+
+/**
+ * Return cached model metadata (name, path, size, mtime) under the cache dir.
+ * @param {{cacheDir?: string}} opts
+ * @returns {Promise<Array<{name:string,path:string,size:number,mtime:string}>>}
+ */
+export async function getCachedModels(opts = {}) {
+  const dir = getCacheDir(opts.cacheDir)
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+    const out = []
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const path = join(dir, e.name)
+      let size = 0
+      try { size = await _dirSize(path) } catch {}
+      let mtime = null
+      try { mtime = (await fs.promises.stat(path)).mtime.toISOString() } catch { mtime = null }
+      out.push({ name: e.name, path, size, mtime })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+/**
  * Download or ensure a model is cached. This delegates to the existing
  * `loadModel`/`Embedder.loadModel` implementation where available.
  *
@@ -110,10 +161,41 @@ export async function ensureModel(modelName, { downloadIfMissing = true, prepare
   return { modelName, cacheDir: res.cacheDir ?? getCacheDir(cacheDir) }
 }
 
+/**
+ * Delete a cached model directory (or directories matching `modelName`).
+ * Returns `true` if at least one directory was removed, `false` if none found.
+ *
+ * @param {string} modelName
+ * @param {{cacheDir?: string}} opts
+ * @returns {Promise<boolean>}
+ */
+export async function deleteModel(modelName, opts = {}) {
+  const dir = getCacheDir(opts.cacheDir);
+  const target = join(dir, modelName);
+  if (await exists(target)) {
+    await fs.promises.rm(target, { recursive: true, force: true });
+    return true;
+  }
+
+  // Fallback: remove any directory whose name contains the modelName string
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    const matches = entries.filter((e) => e.isDirectory() && e.name.includes(modelName));
+    if (matches.length === 0) return false;
+    for (const m of matches) {
+      await fs.promises.rm(join(dir, m.name), { recursive: true, force: true });
+    }
+    return true;
+  } catch (err) {
+    throw err;
+  }
+}
+
 export default {
   isModelDownloaded,
   listModels,
   downloadModel,
   prepareModel,
   ensureModel,
+  deleteModel,
 }
