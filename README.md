@@ -86,70 +86,7 @@ Remove-Item -Recurse -Force $env:USERPROFILE\.embedeer\models\Xenova-all-MiniLM-
 
 ## Explainer — deterministic LLM interface
 
-Embedeer exposes a small, deterministic Explainer API intended for
-structured explanations, labels and citational output. It is designed to be
-imported and called from tools like `gitsema` so you can replace ad-hoc
-prompting with a single, stable contract.
-
-Basic usage:
-
-```js
-import { Explainer } from '@jsilvanus/embedeer';
-
-// Create once and reuse
-const explainer = await Explainer.create('local-llm', { deterministic: true });
-
-const result = await explainer.explain({
-  task: 'narrate',
-  domain: 'evolution',
-  context: { filePath: 'src/auth/handler.ts', threshold: 0.3 },
-  evidence: [
-    { id: 1, source: 'src/auth/handler.ts', excerpt: '2024-03-15 dist_prev=0.421 *** LARGE CHANGE' },
-    { id: 2, source: 'src/auth/handler.ts', excerpt: '2024-06-01 dist_prev=0.089' },
-  ],
-  maxTokens: 256,
-});
-
-console.log(result.explanation);
-```
-
-### Example — load evidence from files
-
-```js
-import { Explainer } from '@jsilvanus/embedeer';
-import fs from 'fs/promises';
-
-async function main() {
-  const explainer = await Explainer.create('local-llm', { deterministic: true });
-
-  // Load one or more source files as evidence (keep excerpts reasonably small)
-  const files = ['src/auth/handler.ts', 'src/auth/README.md'];
-  const evidence = await Promise.all(files.map(async (f, i) => {
-    const content = await fs.readFile(f, 'utf8');
-    return { id: i + 1, source: f, excerpt: content.slice(0, 800) };
-  }));
-
-  const res = await explainer.explain({
-    task: 'explain',
-    domain: 'evolution',
-    context: { files },
-    evidence,
-    maxTokens: 256,
-  });
-
-  console.log(JSON.stringify(res, null, 2));
-}
-
-main().catch(console.error);
-```
-
-Key points:
-- The Explainer enforces deterministic decode settings (greedy, temp=0) by default.
-- Output is parsed and returned as JSON with `explanation`, `labels`, `references`, and `meta` fields.
-- Evidence is injected as numbered blocks; the model is instructed to cite using those IDs only.
-
-Integration with `gitsema`: the package also provides a tiny helper `explainForGitsema()` in `src/gitsema-adapter.js` which maps gitsema's request shape to the Explainer contract.
-
+This was **deprecated** and moved to npm package `chattydeer` in 1.3.0.
 
 ## Input Sources
 
