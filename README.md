@@ -86,7 +86,7 @@ Remove-Item -Recurse -Force $env:USERPROFILE\.embedeer\models\Xenova-all-MiniLM-
 
 ## Explainer — deterministic LLM interface
 
-This was **deprecated** and moved to npm package `chattydeer` in 1.3.0.
+This was **deprecated** and moved to npm package `@jsilvanus/chattydeer` in 1.3.0.
 
 ## Input Sources
 
