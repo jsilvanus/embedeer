@@ -3,6 +3,7 @@
   "version": "1.3.2",
   "description": "A node.js embedding tool with optional GPU acceleration",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "bin": {
     "embedeer": "src/cli.js"
   },
@@ -47,7 +48,9 @@
     "@huggingface/transformers": "^4.0.1"
   },
   "devDependencies": {
+    "@types/node": "^25.5.2",
     "c8": "^8.0.1",
-    "eslint": "^10.2.0"
+    "eslint": "^10.2.0",
+    "typescript": "^6.0.2"
   }
 }
