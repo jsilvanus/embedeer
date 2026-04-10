@@ -1,13 +1,21 @@
 /**
  * Tests for CLI output formatting, input parsing, and model-cache helpers.
  * These are pure unit tests — no workers, no network.
+ *
+ * All helpers are imported directly from cli.js now that it is guarded by an
+ * ESM entry-point check and will not invoke main() when imported.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+
+// Import the real helpers from cli.js instead of duplicating them here.
+// The entry guard in cli.js ensures main() is not called on import.
+const { parseDelimiter, parseTexts, formatOutput, writeOutput } = await import('../src/cli.js');
 
 describe('model-cache', async () => {
   test('DEFAULT_CACHE_DIR is ~/.embedeer/models', async () => {
@@ -29,73 +37,6 @@ describe('model-cache', async () => {
     assert.equal(result, DEFAULT_CACHE_DIR);
   });
 });
-
-// ── Inline helpers mirroring cli.js (cli.js runs main() on import) ──────────
-
-function parseDelimiter(str) {
-  return str
-    .replace(/\\0/g, '\0')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\r/g, '\r');
-}
-
-function parseTexts(raw, delimiter = '\n') {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
-    return parsed;
-  } catch {
-    return raw.split(delimiter).filter(Boolean);
-  }
-}
-
-function formatOutput(texts, embeddings, format, withText = false) {
-  switch (format) {
-    case 'jsonl':
-      return texts
-        .map((text, i) => JSON.stringify({ text, embedding: embeddings[i] }))
-        .join('\n');
-
-    case 'csv': {
-      if (embeddings.length === 0) return '';
-      const dims = embeddings[0].length;
-      const header = ['text', ...Array.from({ length: dims }, (_, k) => `dim_${k}`)].join(',');
-      const rows = texts.map((text, i) => {
-        const safeText = '"' + text.replace(/"/g, '""') + '"';
-        return [safeText, ...embeddings[i]].join(',');
-      });
-      return [header, ...rows].join('\n');
-    }
-
-    case 'txt':
-      if (withText) {
-        return texts.map((text, i) => `${text}\t${embeddings[i].join(' ')}`).join('\n');
-      }
-      return embeddings.map((vec) => vec.join(' ')).join('\n');
-
-    case 'sql': {
-      const rows = texts.map((text, i) => {
-        const safeText = text.replace(/'/g, "''");
-        const vector = JSON.stringify(embeddings[i]);
-        return `  ('${safeText}', '${vector}')`;
-      });
-      return (
-        'INSERT INTO embeddings (text, vector) VALUES\n' +
-        rows.join(',\n') +
-        ';'
-      );
-    }
-
-    default: // json
-      if (withText) {
-        return JSON.stringify(
-          texts.map((text, i) => ({ text, embedding: embeddings[i] }))
-        );
-      }
-      return JSON.stringify(embeddings);
-  }
-}
 
 // ── parseDelimiter ───────────────────────────────────────────────────────────
 
@@ -162,6 +103,18 @@ describe('parseTexts', () => {
     const result = parseTexts('["x","y"]', '|');
     assert.deepEqual(result, ['x', 'y']);
   });
+
+  test('non-array JSON falls through to delimiter splitting', () => {
+    // A JSON number is valid JSON but not an array — treated as raw text.
+    const result = parseTexts('42');
+    assert.deepEqual(result, ['42']);
+  });
+
+  test('JSON string (not array) falls through to delimiter splitting', () => {
+    // '"hello"' is valid JSON but not an array.
+    const result = parseTexts('"hello"');
+    assert.deepEqual(result, ['"hello"']);
+  });
 });
 
 // ── CLI output formatting ────────────────────────────────────────────────────
@@ -216,6 +169,14 @@ describe('CLI output formatting', () => {
     assert.equal(formatOutput([], [], 'csv'), '');
   });
 
+  test('csv with a single embedding still includes header', () => {
+    const out = formatOutput(['one'], [[0.5, 0.6, 0.7]], 'csv');
+    const lines = out.split('\n');
+    assert.equal(lines[0], 'text,dim_0,dim_1,dim_2');
+    assert.equal(lines[1], '"one",0.5,0.6,0.7');
+    assert.equal(lines.length, 2);
+  });
+
   test('txt output is one space-separated line per embedding', () => {
     const out = formatOutput(texts, embeddings, 'txt');
     const lines = out.split('\n');
@@ -244,5 +205,47 @@ describe('CLI output formatting', () => {
     const out = formatOutput(texts, embeddings, 'unknown');
     const parsed = JSON.parse(out);
     assert.deepEqual(parsed, embeddings);
+  });
+});
+
+// ── writeOutput ──────────────────────────────────────────────────────────────
+
+describe('writeOutput', () => {
+  test('writes content + newline to a file when dumpPath is provided', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'embedeer-test-'));
+    try {
+      const dumpPath = join(tmp, 'out.json');
+      writeOutput('[1,2,3]', dumpPath);
+      const content = readFileSync(dumpPath, 'utf8');
+      assert.equal(content, '[1,2,3]\n');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('logs content to console when no dumpPath given', () => {
+    const logged = [];
+    const origLog = console.log;
+    console.log = (...args) => logged.push(args);
+    try {
+      writeOutput('hello output', null);
+      assert.equal(logged.length, 1);
+      assert.equal(logged[0][0], 'hello output');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  test('logs to console when dumpPath is undefined', () => {
+    const logged = [];
+    const origLog = console.log;
+    console.log = (...args) => logged.push(args);
+    try {
+      writeOutput('no path', undefined);
+      assert.equal(logged.length, 1);
+      assert.equal(logged[0][0], 'no path');
+    } finally {
+      console.log = origLog;
+    }
   });
 });

@@ -130,4 +130,21 @@ describe('Embedder', async () => {
       { message: 'model error' },
     );
   });
+
+  test('embed() rejects if any batch in a multi-batch call fails', async () => {
+    // With batchSize 2 and 4 texts there are 2 batches; the second one fails.
+    let callCount = 0;
+    const pool = makeStubPool({
+      run: mock.fn(async (texts) => {
+        callCount++;
+        if (callCount === 2) throw new Error('batch 2 failed');
+        return texts.map(() => [0, 0]);
+      }),
+    });
+    const embedder = await makeEmbedder(pool, 'test-model', { batchSize: 2 });
+    await assert.rejects(
+      () => embedder.embed(['a', 'b', 'c', 'd']),
+      { message: 'batch 2 failed' },
+    );
+  });
 });

@@ -44,6 +44,7 @@ import { Embedder } from './embedder.js';
 import { getCacheDir, DEFAULT_CACHE_DIR } from './model-cache.js';
 import { readFileSync, writeFileSync, appendFileSync } from 'fs';
 import readline from 'readline';
+import { fileURLToPath } from 'url';
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -185,7 +186,7 @@ for (let i = 0; i < args.length; i++) {
 
 // ── Output formatting ───────────────────────────────────────────────────────
 
-function formatOutput(texts, embeddings, format, withText) {
+export function formatOutput(texts, embeddings, format, withText) {
   switch (format) {
     case 'jsonl':
       return texts
@@ -232,7 +233,7 @@ function formatOutput(texts, embeddings, format, withText) {
   }
 }
 
-function writeOutput(content, dumpPath) {
+export function writeOutput(content, dumpPath) {
   if (dumpPath) {
     writeFileSync(dumpPath, content + '\n', 'utf8');
     console.error(`Output written to ${dumpPath}`);
@@ -531,8 +532,11 @@ async function runEmbedding(texts, cacheDir) {
   }
 }
 
-main().catch((err) => {
-  console.error('Error:', err.message);
-  process.exit(1);
-});
+// Only execute main() when this file is run directly, not when imported.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('Error:', err.message);
+    process.exit(1);
+  });
+}
 
