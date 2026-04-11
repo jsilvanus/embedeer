@@ -27,7 +27,8 @@ describe('Embedder.generateAndSaveProfile (grid mode)', () => {
 import child_process from 'child_process'
 import os from 'os'
 import fs from 'fs'
-// Avoid running the real benchmark script
+// Avoid running the real benchmark script (execFileSync after copilot security fix)
+child_process.execFileSync = () => {}
 child_process.execSync = () => {}
 // Use tmp homedir so we don't write to the user's real home
 os.homedir = () => ${JSON.stringify(tmp)}

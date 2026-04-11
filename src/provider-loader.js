@@ -15,7 +15,10 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import fs from 'fs';
+
+/** Cached output of `ldconfig -p` to avoid repeated subprocess calls. */
+let _ldconfigCache = null;
 
 // ── CUDA (linux/x64) ─────────────────────────────────────────────────────────
 
@@ -64,15 +67,17 @@ function cudaSearchDirs() {
  */
 function findLib(libName) {
   for (const dir of cudaSearchDirs()) {
-    if (existsSync(`${dir}/${libName}`)) return `${dir}/${libName}`;
+    if (fs.existsSync(`${dir}/${libName}`)) return `${dir}/${libName}`;
   }
   try {
-    const output = execSync('ldconfig -p', {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8',
-      timeout: 3000,
-    });
-    for (const line of output.split('\n')) {
+    if (_ldconfigCache === null) {
+      _ldconfigCache = execSync('ldconfig -p', {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8',
+        timeout: 3000,
+      });
+    }
+    for (const line of _ldconfigCache.split('\n')) {
       if (line.includes(libName) && line.includes('=>')) {
         const match = line.match(/=>\s*(.+)/);
         if (match) return match[1].trim();
@@ -91,8 +96,8 @@ function findLib(libName) {
  * @returns {Promise<void>}
  * @throws {Error} If NVIDIA GPU is not detected or required CUDA libraries are missing.
  */
-async function activateCuda() {
-  if (!existsSync('/dev/nvidiactl')) {
+function activateCuda() {
+  if (!fs.existsSync('/dev/nvidiactl')) {
     throw new Error(
       'No NVIDIA GPU detected (/dev/nvidiactl not found).\n' +
       'Ensure NVIDIA drivers are installed. Verify with: nvidia-smi',
@@ -124,7 +129,7 @@ async function activateCuda() {
  * @returns {Promise<void>}
  * @throws {Error} If not running on Windows.
  */
-async function activateDml() {
+function activateDml() {
   if (process.platform !== 'win32') {
     throw new Error(
       `DirectML is only available on Windows (current platform: ${process.platform}).`,

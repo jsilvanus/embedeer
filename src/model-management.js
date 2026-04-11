@@ -12,6 +12,23 @@ async function exists(path) {
 }
 
 /**
+ * Check whether a directory entry name matches a given model name.
+ * Matches exactly or with a '-' or '/' separator suffix to avoid
+ * overly-broad substring matches (e.g. 'bert' must not match 'roberta').
+ *
+ * @param {string} entryName  Directory name in the cache
+ * @param {string} modelName  Model name to match against
+ * @returns {boolean}
+ */
+function matchesModelName(entryName, modelName) {
+  return (
+    entryName === modelName ||
+    entryName.startsWith(modelName + '-') ||
+    entryName.startsWith(modelName + '/')
+  )
+}
+
+/**
  * Check whether a model appears to be present in the embedeer cache.
  * This is a best-effort check that looks for an entry matching the
  * requested model name under the cache directory.
@@ -25,11 +42,12 @@ export async function isModelDownloaded(modelName, opts = {}) {
   const target = join(dir, modelName)
   if (await exists(target)) return true
 
-  // Fallback: look for any directory whose name contains the modelName
+  // Fallback: look for any directory whose name matches the model name
+  // (exact or with a separator suffix) to avoid false positives.
   try {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true })
     for (const e of entries) {
-      if (e.isDirectory() && e.name.includes(modelName)) return true
+      if (e.isDirectory() && matchesModelName(e.name, modelName)) return true
     }
   } catch (err) {
     // ignore and return false
@@ -177,10 +195,12 @@ export async function deleteModel(modelName, opts = {}) {
     return true;
   }
 
-  // Fallback: remove any directory whose name contains the modelName string
+  // Fallback: remove any directory whose name matches the model name
+  // (exact or with a separator suffix) to avoid accidentally deleting
+  // unrelated models.
   try {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-    const matches = entries.filter((e) => e.isDirectory() && e.name.includes(modelName));
+    const matches = entries.filter((e) => e.isDirectory() && matchesModelName(e.name, modelName));
     if (matches.length === 0) return false;
     for (const m of matches) {
       await fs.promises.rm(join(dir, m.name), { recursive: true, force: true });
