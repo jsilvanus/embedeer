@@ -19,7 +19,7 @@ import { getCacheDir, buildPipelineOptions } from './model-cache.js';
 import os from 'os';
 import fs from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 export class Embedder {
   /**
@@ -56,7 +56,7 @@ export class Embedder {
 
     this.batchSize = options.batchSize ?? (device === 'gpu' ? 64 : 32);
     // Default provider selection for GPU if not provided
-    const provider = options.provider ?? (device === 'gpu' ? (process.platform === 'win32' ? 'dml' : 'cuda') : options.provider);
+    const provider = options.provider ?? (device === 'gpu' ? (process.platform === 'win32' ? 'dml' : 'cuda') : undefined);
 
     this._pool = new WorkerPool(modelName, {
       poolSize: concurrency,
@@ -132,11 +132,11 @@ export class Embedder {
    */
   static async applyPerfProfile(profilePath, device) {
     const data = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-    const results = (data.results || []).filter((r) => r.success);
+    let results = (data.results || []).filter((r) => r.success);
     if (device) {
       const byDevice = results.filter((r) => r.device === device);
       if (byDevice.length) {
-        results.splice(0, results.length, ...byDevice);
+        results = byDevice;
       }
     }
     if (results.length === 0) throw new Error('No successful results in profile');
@@ -232,9 +232,8 @@ export class Embedder {
       // Run the bench/grid-search.js script and wait for it to finish.
       const script = join(process.cwd(), 'bench', 'grid-search.js');
       const out = profileOut ?? join(process.cwd(), 'bench', `grid-results-${device}-${Date.now()}.json`);
-      const cmd = `node "${script}" --device ${device} --sample-size ${sampleSize} --out "${out}"`;
       try {
-        execSync(cmd, { stdio: 'inherit' });
+        execFileSync(process.execPath, [script, '--device', device, '--sample-size', String(sampleSize), '--out', out], { stdio: 'inherit' });
       } catch (err) {
         throw new Error(`Grid search failed: ${err.message}`);
       }

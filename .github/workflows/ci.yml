@@ -11,23 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18.x]
+        node-version: [18.x, 20.x, 22.x]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'pnpm'
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
+          cache: 'npm'
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci
       - name: Run tests with coverage
-        run: pnpm run coverage
+        run: npm run coverage
       - name: Upload coverage report (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: coverage-report-${{ matrix.node-version }}
           path: coverage

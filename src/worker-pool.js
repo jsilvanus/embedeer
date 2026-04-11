@@ -261,6 +261,18 @@ export class WorkerPool {
   _removeWorker(worker) {
     this.workers = this.workers.filter((w) => w !== worker);
     this.idleWorkers = this.idleWorkers.filter((w) => w !== worker);
+    // If all workers have crashed, reject any pending tasks rather than hanging.
+    if (this.workers.length === 0 && this._initialized && this.pendingTasks.length > 0) {
+      console.error('WorkerPool: all workers have crashed — rejecting all pending tasks');
+      const pending = this.pendingTasks.splice(0);
+      for (const task of pending) {
+        const cb = this.taskCallbacks.get(task.id);
+        if (cb) {
+          this.taskCallbacks.delete(task.id);
+          cb.reject(new Error('WorkerPool: all workers have crashed'));
+        }
+      }
+    }
   }
 }
 
