@@ -3,22 +3,35 @@ import assert from 'node:assert/strict'
 import os from 'os'
 import { Embedder } from '../src/embedder.js'
 
+// `performance.now` lives on a non-writable prototype property in Node 18,
+// so plain assignment (`performance.now = ...`) throws. Installing an own
+// property via defineProperty shadows it; deleting the own property restores
+// access to the original prototype method. Works on Node 18, 20, 22.
+function stubPerformanceNow(impl) {
+  Object.defineProperty(performance, 'now', {
+    configurable: true,
+    writable: true,
+    value: impl,
+  })
+  return () => { delete performance.now }
+}
+
 describe('Embedder performance heuristics', () => {
   test('initialPerformanceCheckup (CPU) low TPS -> batchSize 32, concurrency 1', async () => {
     const origInit = Embedder.prototype.initialize
     const origEmbed = Embedder.prototype.embed
     const origDestroy = Embedder.prototype.destroy
-    const origPerf = performance.now
+    let restorePerf
     try {
       Embedder.prototype.initialize = async function () {}
       Embedder.prototype.embed = async function (sample) { return sample.map(() => [0]) }
       Embedder.prototype.destroy = async function () {}
 
       let calls = 0
-      performance.now = () => {
+      restorePerf = stubPerformanceNow(() => {
         calls += 1
         return calls === 1 ? 0 : 1000
-      }
+      })
 
       const cfg = await Embedder.initialPerformanceCheckup({ device: 'cpu', sampleSize: 50, modelName: 'test-model' })
       assert.equal(cfg.batchSize, 32)
@@ -28,7 +41,7 @@ describe('Embedder performance heuristics', () => {
       Embedder.prototype.initialize = origInit
       Embedder.prototype.embed = origEmbed
       Embedder.prototype.destroy = origDestroy
-      performance.now = origPerf
+      restorePerf?.()
     }
   })
 
@@ -36,17 +49,17 @@ describe('Embedder performance heuristics', () => {
     const origInit = Embedder.prototype.initialize
     const origEmbed = Embedder.prototype.embed
     const origDestroy = Embedder.prototype.destroy
-    const origPerf = performance.now
+    let restorePerf
     try {
       Embedder.prototype.initialize = async function () {}
       Embedder.prototype.embed = async function (sample) { return sample.map(() => [0]) }
       Embedder.prototype.destroy = async function () {}
 
       let calls = 0
-      performance.now = () => {
+      restorePerf = stubPerformanceNow(() => {
         calls += 1
         return calls === 1 ? 0 : 1 // tiny elapsed -> very high TPS
-      }
+      })
 
       const cfg = await Embedder.initialPerformanceCheckup({ device: 'cpu', sampleSize: 50, modelName: 'test-model' })
       assert.equal(cfg.batchSize, 64)
@@ -56,7 +69,7 @@ describe('Embedder performance heuristics', () => {
       Embedder.prototype.initialize = origInit
       Embedder.prototype.embed = origEmbed
       Embedder.prototype.destroy = origDestroy
-      performance.now = origPerf
+      restorePerf?.()
     }
   })
 
@@ -64,17 +77,17 @@ describe('Embedder performance heuristics', () => {
     const origInit = Embedder.prototype.initialize
     const origEmbed = Embedder.prototype.embed
     const origDestroy = Embedder.prototype.destroy
-    const origPerf = performance.now
+    let restorePerf
     try {
       Embedder.prototype.initialize = async function () {}
       Embedder.prototype.embed = async function (sample) { return sample.map(() => [0]) }
       Embedder.prototype.destroy = async function () {}
 
       let calls = 0
-      performance.now = () => {
+      restorePerf = stubPerformanceNow(() => {
         calls += 1
         return calls === 1 ? 0 : 1
-      }
+      })
 
       const cfg = await Embedder.initialPerformanceCheckup({ device: 'gpu', sampleSize: 50, modelName: 'test-model' })
       assert.equal(cfg.batchSize, 128)
@@ -84,7 +97,7 @@ describe('Embedder performance heuristics', () => {
       Embedder.prototype.initialize = origInit
       Embedder.prototype.embed = origEmbed
       Embedder.prototype.destroy = origDestroy
-      performance.now = origPerf
+      restorePerf?.()
     }
   })
 
