@@ -40,7 +40,6 @@
  *   -h, --help                   Show this help
  */
 
-import { Embedder } from './embedder.js';
 import { getCacheDir, DEFAULT_CACHE_DIR } from './model-cache.js';
 import { readFileSync, writeFileSync, appendFileSync } from 'fs';
 import readline from 'readline';
@@ -321,6 +320,7 @@ async function runInteractive(cacheDir) {
   }
 
   // Load the model before opening the reader so we are ready to embed immediately.
+  const { Embedder } = await import('./embedder.js');
   console.error(`Loading model: ${options.model}…`);
   const embedder = await Embedder.create(options.model, {
     batchSize: options.batchSize,
@@ -463,6 +463,7 @@ async function main() {
     const stdinRaw = await readStdin();
     if (!stdinRaw) {
       // No data — download/cache the model and exit.
+      const { Embedder } = await import('./embedder.js');
       console.error(`Pulling model: ${options.model}`);
       console.error(`Cache directory: ${resolvedCacheDir}`);
       await Embedder.loadModel(options.model, {
@@ -505,6 +506,7 @@ async function main() {
 
 async function runEmbedding(texts, cacheDir) {
   const t0 = options.timer ? performance.now() : 0;
+  const { Embedder } = await import('./embedder.js');
 
   const embedder = await Embedder.create(options.model, {
     batchSize: options.batchSize,

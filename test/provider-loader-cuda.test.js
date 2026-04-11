@@ -35,11 +35,13 @@ describe('provider-loader (CUDA activation via runner)', () => {
       const providerLoaderFileUrl = pathToFileURL(providerLoaderPath).href
 
       const code = `
-import fs from 'fs'
+import { createRequire } from 'module'
 import process from 'process'
-const origExists = fs.existsSync
+const req = createRequire(import.meta.url)
+const fsModule = req('fs')
+const origExists = fsModule.existsSync
 // pretend /dev/nvidiactl exists on this test runner
-fs.existsSync = (p) => (p === '/dev/nvidiactl') || origExists(p)
+fsModule.existsSync = (p) => (p === '/dev/nvidiactl') || origExists(p)
 // point LD_LIBRARY_PATH to our temp dir so findLib sees the dummy libs
 process.env.LD_LIBRARY_PATH = ${JSON.stringify(tmp)}
 const mod = await import(${JSON.stringify(providerLoaderFileUrl)})
