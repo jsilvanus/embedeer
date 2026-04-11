@@ -19,7 +19,7 @@ import { getCacheDir, buildPipelineOptions } from './model-cache.js';
 import os from 'os';
 import fs from 'fs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
+import childProcess from 'child_process';
 
 export class Embedder {
   /**
@@ -233,7 +233,7 @@ export class Embedder {
       const script = join(process.cwd(), 'bench', 'grid-search.js');
       const out = profileOut ?? join(process.cwd(), 'bench', `grid-results-${device}-${Date.now()}.json`);
       try {
-        execFileSync(process.execPath, [script, '--device', device, '--sample-size', String(sampleSize), '--out', out], { stdio: 'inherit' });
+        childProcess.execFileSync(process.execPath, [script, '--device', device, '--sample-size', String(sampleSize), '--out', out], { stdio: 'inherit' });
       } catch (err) {
         throw new Error(`Grid search failed: ${err.message}`);
       }
