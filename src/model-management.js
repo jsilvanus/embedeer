@@ -1,6 +1,6 @@
 import { getCacheDir } from './model-cache.js'
 import fs from 'fs'
-import { join } from 'path'
+import { join, basename } from 'path'
 
 async function exists(path) {
   try {
@@ -211,6 +211,39 @@ export async function deleteModel(modelName, opts = {}) {
   }
 }
 
+/**
+ * Import a local model directory or file into the embedeer cache.
+ * Copies `src` into the resolved cache directory and returns the copied
+ * model name and path.
+ *
+ * @param {string} src  Path to local file or directory to import
+ * @param {{name?:string,cacheDir?:string}} opts
+ * @returns {Promise<{modelName:string,path:string}>}
+ */
+export async function importLocalModel(src, { name, cacheDir } = {}) {
+  if (!(await exists(src))) throw new Error(`Source path not found: ${src}`)
+  const dir = getCacheDir(cacheDir)
+  const requestedName = name
+  const base = requestedName ?? basename(src)
+  let dest = join(dir, base)
+
+  if (await exists(dest)) {
+    if (requestedName) {
+      throw new Error(`Model name '${requestedName}' already exists in cache: ${dest}`)
+    }
+    dest = join(dir, `${base}-${Date.now()}`)
+  }
+
+  // Ensure parent exists (getCacheDir already created cache root)
+  try {
+    await fs.promises.cp(src, dest, { recursive: true })
+  } catch (err) {
+    throw new Error(`Failed to copy local model: ${err.message}`)
+  }
+
+  return { modelName: basename(dest), path: dest }
+}
+
 export default {
   isModelDownloaded,
   listModels,
@@ -218,4 +251,6 @@ export default {
   prepareModel,
   ensureModel,
   deleteModel,
+  getCachedModels,
+  importLocalModel,
 }

@@ -33,7 +33,7 @@ export async function loadModel(modelName, options) {
 }
 
 // Model management helpers (convenience API)
-export { isModelDownloaded, listModels, downloadModel, prepareModel, ensureModel, deleteModel, getCachedModels } from './model-management.js'
+export { isModelDownloaded, listModels, downloadModel, prepareModel, ensureModel, deleteModel, getCachedModels, importLocalModel } from './model-management.js'
 
 // Runtime: models currently loaded into worker pools
 export { getLoadedModels } from './runtime-models.js'

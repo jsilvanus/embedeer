@@ -28,6 +28,30 @@ Supports **batched** input, **parallel** execution, isolated **child-process** w
 
 ---
 
+## How it works
+
+```
+embed(texts)
+  │
+  ├─ split into batches of batchSize
+  │
+  └─ Promise.all(batches) ──► WorkerPool
+                                 │
+                                 ├─ [process mode] ChildProcessWorker 0
+                                 │   resolveProvider(device, provider)
+                                 │   → pipeline('feature-extraction', model, { device: 'cuda' })
+                                 │   → embed batch A
+                                 │
+                                 └─ [process mode] ChildProcessWorker 1
+                                     resolveProvider(device, provider)
+                                     → pipeline(...) → embed batch B
+```
+
+Workers load the model **once** at startup and reuse it for all batches.  
+Provider activation happens per-worker before the pipeline is created.
+
+--- 
+
 ## Installation
 
 ```bash
@@ -42,74 +66,7 @@ which ships as a transitive dependency. No additional packages are required.
 ```bash
 # Ubuntu / Debian
 sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
-## Programmatic API
 ```
-
----
-
-## Model management
-
-Embedeer supports pre-caching and managing downloaded models.
-
-- Pull (pre-cache) a model via the CLI:
-
-```bash
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
-```
-
-- Programmatic pre-cache using `loadModel()`:
-
-```js
-import { loadModel } from '@jsilvanus/embedeer';
-
-const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
-  token: 'hf_...',    // optional HF token
-  dtype: 'q8',        // optional quantization
-  cacheDir: '/my/cache', // optional override
-});
-```
-
-- Cache location: default is `~/.embedeer/models`. Override with the CLI `--cache-dir` option or the `cacheDir` argument to `loadModel()`.
-
-- Removing cached models: delete the model directory from the cache. Example:
-
-```bash
-# Unix
-rm -rf ~/.embedeer/models/Xenova-all-MiniLM-L6-v2
-
-# PowerShell (Windows)
-Remove-Item -Recurse -Force $env:USERPROFILE\.embedeer\models\Xenova-all-MiniLM-L6-v2
-```
-
-- Advanced: see `src/model-management.js` for low-level cache helpers.
-
-### Model compatibility (ONNX)
-
-Embedeer runs models via `onnxruntime-node`. Models chosen from Hugging Face must provide an ONNX export compatible with ONNX Runtime, or be convertible to ONNX (see [Optimum](https://github.com/huggingface/optimum-onnx)). If a model does not include an ONNX build, export it and place the ONNX files in your cache or publish them to the model repository so `embedeer` can load them.
-
-### Programmatic runtime & cache helpers
-
-Two small runtime/cache helpers are available from the public API:
-
-- `getLoadedModels()` — returns an array of model names currently loaded by active worker pools.
-- `deleteModel(modelName, { cacheDir? })` — remove cached model directories matching `modelName`.
-
-Example:
-
-```js
-import { getLoadedModels, deleteModel } from '@jsilvanus/embedeer';
-
-// Synchronous list of models currently loaded by any running WorkerPool
-console.log(getLoadedModels()); // e.g. ['Xenova/all-MiniLM-L6-v2']
-
-// Remove a cached model from disk (async)
-const removed = await deleteModel('Xenova/all-MiniLM-L6-v2');
-console.log('removed?', removed);
-```
-
-## Explainer — deterministic LLM interface
-
-This was **deprecated** and moved to npm package [`@jsilvanus/chattydeer`](https://www.npmjs.com/package/@jsilvanus/chattydeer) in 1.3.0.
 
 ## Input Sources
 
@@ -152,20 +109,6 @@ async function main() {
 main().catch(console.error);
 ```
 
-### Programmatic profile generation (optional)
-
-You can generate and save a per-user performance profile which `Embedder.create()` will
-automatically apply. This is useful to pick the best `batchSize` / `concurrency` for your
-machine without manual tuning.
-
-```js
-import { Embedder } from '@jsilvanus/embedeer';
-
-// Quick profile generation (writes ~/.embedeer/perf-profile.json)
-await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize: 100 });
-// Subsequent calls to Embedder.create() will auto-apply the saved profile by default.
-```
-
 ### Embed texts with GPU
 
 ```js
@@ -188,6 +131,110 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 ```
 
 ---
+
+---
+
+## Model management
+
+Embedeer supports pre-caching and managing downloaded models.
+
+- Pull (pre-cache) a model via the CLI:
+
+```bash
+npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
+```
+
+- Programmatic pre-cache using `loadModel()`:
+
+```js
+import { loadModel } from '@jsilvanus/embedeer';
+
+const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
+  token: 'hf_...',    // optional HF token
+  dtype: 'q8',        // optional quantization
+  cacheDir: '/my/cache', // optional override
+});
+```
+
+- Cache location: default is `~/.embedeer/models`. Override with the CLI `--cache-dir` option or the `cacheDir` argument to `loadModel()`.
+
+### Local models
+
+Embedeer can load models directly from local directories or copy a local model into the embedeer cache for reuse.
+
+- Use a local model path directly (no copying)
+
+```bash
+npx @jsilvanus/embedeer --use-local /path/to/local-model --data "Hello world"
+```
+
+- Copy a local model into the cache and give it a stable name:
+
+```bash
+npx @jsilvanus/embedeer --load-local /path/to/local-model --name my-local-model
+```
+
+- How to use a local models?
+
+```bash
+npx @jsilvanus/embedeer --model my-local-model
+# or
+npx @jsilvanus/embedeer --model ~/.embedeer/models/my-local-model
+```
+
+### Model compatibility (ONNX)
+
+Embedeer runs models via `onnxruntime-node`. Models chosen from Hugging Face must provide an ONNX export compatible with ONNX Runtime, or be convertible to ONNX (see [Optimum](https://github.com/huggingface/optimum-onnx)). If a model does not include an ONNX build, export it and place the ONNX files in your cache or publish them to the model repository so `embedeer` can load them.
+
+### Programmatic runtime & cache helpers
+
+Two small runtime/cache helpers are available from the public API:
+
+- `getLoadedModels()` — returns an array of model names currently loaded by active worker pools.
+- `deleteModel(modelName, { cacheDir? })` — remove cached model directories matching `modelName`.
+
+Example:
+
+```js
+import { getLoadedModels, deleteModel } from '@jsilvanus/embedeer';
+
+// Synchronous list of models currently loaded by any running WorkerPool
+console.log(getLoadedModels()); // e.g. ['Xenova/all-MiniLM-L6-v2']
+
+// Remove a cached model from disk (async)
+const removed = await deleteModel('Xenova/all-MiniLM-L6-v2');
+console.log('removed?', removed);
+```
+
+### Programmatic local models
+
+```js
+import { importLocalModel, Embedder } from '@jsilvanus/embedeer';
+
+// Load directly from a local directory (no copy)
+const embedder = await Embedder.create('/path/to/local-model', { cacheDir: '/my/cache' });
+const vecs = await embedder.embed(['hello world']);
+await embedder.destroy();
+
+// Copy into cache as 'my-local-model'
+const { modelName, path } = await importLocalModel('/path/to/local-model', { name: 'my-local-model' });
+console.log('cached at', path);
+
+// Use the cached name like any other model
+const e = await Embedder.create(modelName);
+await e.destroy();
+```
+
+Helpful programmatic helpers:
+
+- `importLocalModel(src, { name?, cacheDir? })` — copy a local model into the cache and return `{ modelName, path }`.
+- `getCacheDir()` — return the resolved cache directory used by embedeer (useful when you want to manage files yourself).
+- `isModelDownloaded(name)` / `listModels()` / `getCachedModels()` — inspect the cache.
+- `deleteModel(name)` — remove a cached model directory.
+
+These functions are exported from the public package entry (`src/index.js`) so you can import them from `@jsilvanus/embedeer`.
+
+--- 
 
 ## CLI
 
@@ -525,38 +572,19 @@ node bench/grid-search.js --device cpu --sample-size 200 --out bench/grid-result
 node bench/grid-search.js --device gpu --sample-size 100 --out bench/grid-results-gpu.json
 ```
 
-Programmatic profile generation (writes `~/.embedeer/perf-profile.json`):
+### Programmatic profile generation (optional)
+
+You can generate and save a per-user performance profile which `Embedder.create()` will
+automatically apply. This is useful to pick the best `batchSize` / `concurrency` for your
+machine without manual tuning.
 
 ```js
 import { Embedder } from '@jsilvanus/embedeer';
 
+// Quick profile generation (writes ~/.embedeer/perf-profile.json)
 await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize: 100 });
-// Embedder.create() will auto-apply a saved per-user profile by default
+// Subsequent calls to Embedder.create() will auto-apply the saved profile by default.
 ```
-
---- 
-
-## How it works
-
-```
-embed(texts)
-  │
-  ├─ split into batches of batchSize
-  │
-  └─ Promise.all(batches) ──► WorkerPool
-                                 │
-                                 ├─ [process mode] ChildProcessWorker 0
-                                 │   resolveProvider(device, provider)
-                                 │   → pipeline('feature-extraction', model, { device: 'cuda' })
-                                 │   → embed batch A
-                                 │
-                                 └─ [process mode] ChildProcessWorker 1
-                                     resolveProvider(device, provider)
-                                     → pipeline(...) → embed batch B
-```
-
-Workers load the model **once** at startup and reuse it for all batches.  
-Provider activation happens per-worker before the pipeline is created.
 
 ---
 

@@ -37,13 +37,16 @@
  *       --device <mode>          Compute device: auto|cpu|gpu (default: cpu)
  *       --provider <name>        Execution provider override: cpu|cuda|dml
  *       --prefix <str>           Text prepended to every input before embedding
+ *       --load-local <path>      Copy a local model directory into the cache and use it
+ *       --use-local <path>       Use a local model path directly (no copying)
  *   -h, --help                   Show this help
  */
 
 import { getCacheDir, DEFAULT_CACHE_DIR } from './model-cache.js';
-import { readFileSync, writeFileSync, appendFileSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, statSync, existsSync, cpSync, copyFileSync } from 'fs';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
+import { basename, join } from 'path';
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -89,6 +92,8 @@ Options:
       --provider <name>        Execution provider override: cpu|cuda|dml
       --prefix <str>           Text prepended to every input before embedding
                                (e.g. "search_query: " for nomic-embed-text)
+      --load-local <path>      Copy a local model directory into the cache and use it
+      --use-local <path>       Use a local model path directly (no copying)
       --timer                  Print elapsed wall-clock time to stderr when done
   -h, --help                   Show this help
 `.trim());
@@ -102,6 +107,7 @@ const KNOWN_FLAGS = new Set([
   '--mode', '--pooling', '-p', '--no-normalize', '--dtype', '--token',
   '--cache-dir', '--device', '--provider', '--delimiter', '-D',
   '--interactive', '-i', '--prefix', '--timer',
+  '--load-local', '--use-local',
 ]);
 const options = {
   model: 'nomic-embed-text',
@@ -123,6 +129,8 @@ const options = {
   device: undefined,
   provider: undefined,
   prefix: undefined,
+  loadLocal: undefined, // --load-local <path> copy to cache and use
+  useLocal: undefined,  // --use-local <path> use path directly without copying
   timer: false,
 };
 
@@ -178,6 +186,10 @@ for (let i = 0; i < args.length; i++) {
     options.prefix = args[++i];
   } else if (arg === '--timer') {
     options.timer = true;
+  } else if (arg === '--load-local') {
+    options.loadLocal = args[++i];
+  } else if (arg === '--use-local') {
+    options.useLocal = args[++i];
   } else {
     positional.push(arg);
   }
@@ -451,6 +463,45 @@ async function runInteractive(cacheDir) {
 
 async function main() {
   const resolvedCacheDir = getCacheDir(options.cacheDir);
+
+  // Local model support:
+  // --use-local <path> uses the provided path directly (no copying).
+  // --load-local <path> copies the local model (file or directory) into
+  // the resolved cache directory and then uses the copied path as the model.
+  if (options.useLocal) {
+    options.model = options.useLocal;
+    console.error(`Using local model path: ${options.model}`);
+  } else if (options.loadLocal) {
+    const src = options.loadLocal;
+    if (!existsSync(src)) {
+      console.error(`Error: local model path not found: ${src}`);
+      process.exit(1);
+    }
+    const requestedName = options.name;
+    const base = requestedName ?? basename(src);
+    let dest = join(resolvedCacheDir, base);
+    if (existsSync(dest)) {
+      if (requestedName) {
+        console.error(`Error: model name '${requestedName}' already exists in cache: ${dest}`);
+        process.exit(1);
+      }
+      dest = join(resolvedCacheDir, `${base}-${Date.now()}`);
+    }
+    try {
+      const s = statSync(src);
+      if (s.isDirectory()) {
+        cpSync(src, dest, { recursive: true });
+      } else {
+        // src is a file
+        copyFileSync(src, dest);
+      }
+      console.error(`Copied local model into cache: ${dest}`);
+      options.model = dest;
+    } catch (err) {
+      console.error('Error copying local model:', err.message);
+      process.exit(1);
+    }
+  }
 
   // ── Interactive line-reader mode ─────────────────────────────────────────
   if (options.interactive) {
