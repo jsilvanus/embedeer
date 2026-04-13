@@ -47,8 +47,7 @@ embed(texts)
                                      → pipeline(...) → embed batch B
 ```
 
-Workers load the model **once** at startup and reuse it for all batches.  
-Provider activation happens per-worker before the pipeline is created.
+Workers load the model **once** at startup and reuse it for all batches. (N workers means N loaded models in memory!) Provider activation happens per-worker before the pipeline is created.
 
 --- 
 
