@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Grid search for embedeer: batchSize × concurrency × dtype
 
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
@@ -22,7 +22,7 @@ const opts = {
   device: arg('--device', 'cpu'), // cpu or gpu
   sampleSize: Number(arg('--sample-size', '200')),
   warmup: arg('--warmup', 'true') !== 'false',
-  out: arg('--out', join(__dirname, 'grid-results.json')),
+  out: arg('--out', join(__dirname, 'results', `grid-results-${arg('--device','cpu')}-${Date.now()}.json`)),
 };
 
 function parseList(s, def) {
@@ -36,7 +36,7 @@ function parseList(s, def) {
 const defaultRanges = {
   cpu: {
     batchSizes: [16, 32, 64],
-    concurrencies: [1, 2, 4],
+    concurrencies: [1, 2, 4, 8],
     dtypes: ['fp32', 'fp16', 'q8', 'q4', 'auto'],
   },
   gpu: {
@@ -112,6 +112,11 @@ async function runConfig(conf) {
 async function main() {
   console.log(`Grid search: model=${opts.model} device=${opts.device} sample=${opts.sampleSize}`);
   console.log('Ranges:', ranges);
+
+  // Ensure output directory exists
+  try {
+    mkdirSync(dirname(opts.out), { recursive: true });
+  } catch (err) {}
 
   // Pre-load model into cache to avoid repeated downloads
   try {

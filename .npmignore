@@ -1,0 +1,4 @@
+# Exclude generated benchmark result files and directories from npm package
+bench/results
+bench/results/**
+bench/grid-results*.json

@@ -16,7 +16,12 @@
   "files": [
     "src",
     "README.md",
-    "bench"
+    "bench/compare.js",
+    "bench/grid-search.js",
+    "bench/ollama-bench.js",
+    "bench/validate-embeddings.js",
+    "bench/texts-100.txt",
+    "bench/texts-1000.txt"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",

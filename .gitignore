@@ -14,7 +14,7 @@ pnpm*
 # Coverage tools
 coverage/
 
-#ignore log files
+# ignore log files
 *.log
 
 # Ignore environment variables
@@ -22,6 +22,9 @@ coverage/
 
 # Grid-search results
 bench/grid-results*.json
+
+# Bench results directory (generated at runtime)
+bench/results/
 
 # Packaged tarballs
 *.tgz
