@@ -15,7 +15,8 @@
   },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "bench"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
