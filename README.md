@@ -8,7 +8,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@jsilvanus/embedeer.svg?label=downloads)](https://www.npmjs.com/package/@jsilvanus/embedeer)
 [![release downloads](https://img.shields.io/github/downloads/jsilvanus/embedeer/total.svg?label=downloads)](https://github.com/jsilvanus/embedeer/releases)
 
-A Node.js tool for generating text embeddings using models from [Hugging Face](https://huggingface.co/models).
+A Node.js tool for generating text embeddings using [transformers.js](https://github.com/huggingface/transformers.js) with ONXX models from [Hugging Face](https://huggingface.co/models).
 
 Supports **batched** input, **parallel** execution, isolated **child-process** workers (default) or **in-process threads**, quantization, optional GPU acceleration, and Hugging Face auth.
 
@@ -82,6 +82,10 @@ Remove-Item -Recurse -Force $env:USERPROFILE\.embedeer\models\Xenova-all-MiniLM-
 ```
 
 - Advanced: see `src/model-management.js` for low-level cache helpers.
+
+### Model compatibility (ONNX)
+
+Embedeer runs models via `onnxruntime-node`. Models chosen from Hugging Face must provide an ONNX export compatible with ONNX Runtime, or be convertible to ONNX (see [Optimum](https://github.com/huggingface/optimum-onnx)). If a model does not include an ONNX build, export it and place the ONNX files in your cache or publish them to the model repository so `embedeer` can load them.
 
 ### Programmatic runtime & cache helpers
 
