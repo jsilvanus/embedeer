@@ -150,6 +150,8 @@ async function main() {
           console.error('Failed to write results:', err?.message ?? err);
         }
         process.stderr.write(`  -> ${res.success ? `${res.textsPerSec} t/s` : 'failed'}\n`);
+        // Also print a compact Result line with the configuration and the measured time
+        process.stderr.write(`Result: ${JSON.stringify(conf)} -> ${res.success ? `${res.textsPerSec} t/s` : 'failed'}\n`);
       }
     }
   }
