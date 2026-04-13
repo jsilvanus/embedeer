@@ -1,6 +1,6 @@
 {
   "name": "@jsilvanus/embedeer",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "A node.js embedding tool with optional GPU acceleration",
   "main": "src/index.js",
   "types": "src/index.d.ts",
