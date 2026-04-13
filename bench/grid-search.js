@@ -38,19 +38,27 @@ const defaultRanges = {
     batchSizes: [16, 32, 64],
     concurrencies: [1, 2, 4, 8],
     dtypes: ['fp32', 'fp16', 'q8', 'q4', 'auto'],
+    modes: ['thread'], // CPU defaults to thread workers
   },
   gpu: {
     batchSizes: [32, 64, 128],
     concurrencies: [1, 2],
     dtypes: ['fp32', 'fp16', 'auto'],
+    modes: ['process'], // GPU defaults to process workers for better isolation
   },
 };
 
-const ranges = {
-  batchSizes: parseList(arg('--batch-sizes', ''), defaultRanges[opts.device].batchSizes),
-  concurrencies: parseList(arg('--concurrencies', ''), defaultRanges[opts.device].concurrencies),
-  dtypes: parseList(arg('--dtypes', ''), defaultRanges[opts.device].dtypes),
+const cliRanges = {
+  batchSizes: arg('--batch-sizes', ''),
+  concurrencies: arg('--concurrencies', ''),
+  dtypes: arg('--dtypes', ''),
+  // modes: comma-separated list of 'process'|'thread'
+  modes: arg('--modes', ''),
 };
+
+const deviceArgProvided = argv.indexOf('--device') !== -1;
+const devices = deviceArgProvided ? String(arg('--device', '')).split(',').map((s) => s.trim()).filter(Boolean) : ['cpu', 'gpu'];
+const modes = ['thread', 'process'];
 
 const texts = readFileSync(join(__dirname, 'texts-1000.txt'), 'utf8')
   .split('\n').map((l) => l.trim()).filter(Boolean);
@@ -110,8 +118,8 @@ async function runConfig(conf) {
 }
 
 async function main() {
-  console.log(`Grid search: model=${opts.model} device=${opts.device} sample=${opts.sampleSize}`);
-  console.log('Ranges:', ranges);
+  console.log(`Grid search: model=${opts.model} devices=${devices.join(',')} sample=${opts.sampleSize}`);
+  console.log('Ranges (CLI overrides):', cliRanges);
 
   // Ensure output directory exists
   try {
@@ -129,29 +137,44 @@ async function main() {
 
   const results = [];
 
-  // Iterate grid
-  for (const dtype of ranges.dtypes) {
-    for (const batchSize of ranges.batchSizes) {
-      for (const concurrency of ranges.concurrencies) {
-        const conf = {
-          device: opts.device,
-          provider: opts.device === 'win32' ? 'dml' : (opts.device === 'gpu' ? (process.platform === 'win32' ? 'dml' : 'cuda') : 'cpu'),
-          batchSize,
-          concurrency,
-          dtype,
-        };
-        process.stderr.write(`Testing ${JSON.stringify(conf)}…\n`);
-        const res = await runConfig(conf);
-        results.push(res);
-        // append to output file incrementally
-        try {
-          writeFileSync(opts.out, JSON.stringify({ generated: new Date().toISOString(), ranges, results }, null, 2));
-        } catch (err) {
-          console.error('Failed to write results:', err?.message ?? err);
+  // Iterate grid across devices and modes
+  for (const device of devices) {
+    const ranges = {
+      batchSizes: parseList(cliRanges.batchSizes, defaultRanges[device].batchSizes),
+      concurrencies: parseList(cliRanges.concurrencies, defaultRanges[device].concurrencies),
+      dtypes: parseList(cliRanges.dtypes, defaultRanges[device].dtypes),
+      modes: parseList(cliRanges.modes, defaultRanges[device].modes),
+    };
+
+    for (const mode of ranges.modes) {
+      for (const dtype of ranges.dtypes) {
+        for (const batchSize of ranges.batchSizes) {
+          for (const concurrency of ranges.concurrencies) {
+            const conf = {
+              device,
+              mode,
+              provider: device === 'gpu' ? (process.platform === 'win32' ? 'dml' : 'cuda') : 'cpu',
+              batchSize,
+              concurrency,
+              dtype,
+            };
+
+            process.stderr.write(`Testing ${JSON.stringify(conf)}…\n`);
+            const res = await runConfig(conf);
+            results.push(res);
+
+            // append to output file incrementally
+            try {
+              writeFileSync(opts.out, JSON.stringify({ generated: new Date().toISOString(), devices, cliRanges, results }, null, 2));
+            } catch (err) {
+              console.error('Failed to write results:', err?.message ?? err);
+            }
+
+            process.stderr.write(`  -> ${res.success ? `${res.textsPerSec} t/s` : 'failed'}\n`);
+            // Also print a compact Result line with the configuration and the measured time
+            process.stderr.write(`Result: ${JSON.stringify(conf)} -> ${res.success ? `${res.textsPerSec} t/s` : 'failed'}\n`);
+          }
         }
-        process.stderr.write(`  -> ${res.success ? `${res.textsPerSec} t/s` : 'failed'}\n`);
-        // Also print a compact Result line with the configuration and the measured time
-        process.stderr.write(`Result: ${JSON.stringify(conf)} -> ${res.success ? `${res.textsPerSec} t/s` : 'failed'}\n`);
       }
     }
   }
