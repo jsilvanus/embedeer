@@ -228,12 +228,13 @@ terminate() { grpc.closeClient(this._stub); return Promise.resolve(); }
   this._WorkerClass = GrpcWorker;
   this._workerScript = null;
   // Normalise single-server shorthand to the internal servers array.
+  // dtype/pooling/normalize are top-level — they must be uniform across all
+  // servers so every server produces comparable embedding vectors.
   this._servers = options.servers ?? [{
     address:  options.grpcAddress ?? 'localhost:50051',
     workers:  options.concurrency ?? poolSize,
     device:   options.device,
     provider: options.provider,
-    dtype:    options.dtype,
   }];
   this._grpcLoadBalancing = options.grpcLoadBalancing ?? null;
   this._autoStartServer   = options.autoStartServer ?? true;
@@ -246,7 +247,8 @@ async _startServers() {
   // For each entry in this._servers:
   //   1. Attempt a quick gRPC health probe (waitForReady with 200 ms deadline).
   //   2. If it fails (and autoStartServer is true), spawn grpc-model-server.js
-  //      with the entry's device/provider/dtype/grpcAddress as argv flags.
+  //      with the entry's device/provider config as argv flags, plus the
+  //      top-level dtype/pooling/normalize (uniform across all servers).
   //   3. Wait for {"type":"ready"} on the child's stdout.
   //   4. Push the child into this._serverProcesses[].
   // All spawns run concurrently (Promise.all) — multiple GPU servers load
@@ -438,27 +440,13 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 ```js
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   mode: 'grpc',
+  dtype: 'fp16',        // uniform — all servers load the same quantization
+  pooling: 'mean',      // uniform
+  normalize: true,      // uniform
   servers: [
-    {
-      address:  'localhost:50051',
-      workers:  6,
-      device:   'cuda',
-      provider: 'cuda',
-      dtype:    'fp16',
-    },
-    {
-      address:  'localhost:50052',
-      workers:  6,
-      device:   'cuda',
-      provider: 'cuda',
-      dtype:    'fp16',
-    },
-    {
-      address:  'localhost:50053',
-      workers:  2,
-      device:   'cpu',
-      dtype:    'q8',
-    },
+    { address: 'localhost:50051', workers: 6, device: 'cuda', provider: 'cuda' },
+    { address: 'localhost:50052', workers: 6, device: 'cuda', provider: 'cuda' },
+    { address: 'localhost:50053', workers: 2, device: 'cpu' },
   ],
   autoStartServer: true,
 });
@@ -502,13 +490,23 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 
 ## Options Reference
 
+**Top-level (uniform — all servers must produce identical vectors):**
+
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `'process'` | `'process'` \| `'thread'` \| `'socket'` \| `'grpc'` |
 | `concurrency` | number | numCores | Workers for single-server shorthand |
 | `batchSize` | number | 32 | Max texts per worker task |
+| `dtype` | string | `'fp32'` | Quantization applied to every server (`'fp32'`\|`'fp16'`\|`'q8'`\|`'q4'`\|`'q4f16'`\|`'auto'`) |
+| `pooling` | string | `'mean'` | Pooling strategy — must match across servers |
+| `normalize` | boolean | `true` | L2 normalisation — must match across servers |
+
+**Routing (per-server hardware config):**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
 | `grpcAddress` | string | `'localhost:50051'` | Single-server shorthand address |
-| `servers` | object[] | — | Multi-server list; each entry has `address`, `workers`, `device`, `provider`, `dtype` |
+| `servers` | object[] | — | Multi-server list; each entry has `address`, `workers`, `device`, `provider` |
 | `grpcLoadBalancing` | string | — | gRPC LB policy — `'round_robin'` for built-in equal-weight distribution |
 | `autoStartServer` | boolean | `true` | Spawn server process(es) if not reachable |
 

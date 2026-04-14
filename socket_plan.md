@@ -130,12 +130,13 @@ new SocketWorker(scriptPath, { workerData })
   this._WorkerClass = SocketWorker;
   this._workerScript = null;
   // Normalise to the servers array format used internally.
+  // dtype/pooling/normalize are top-level — they must be uniform across all
+  // servers so every server produces comparable embedding vectors.
   this._servers = options.servers ?? [{
     socketPath: options.socketPath ?? defaultSocketPath(modelName),
     workers:    options.concurrency ?? poolSize,
     device:     options.device,
     provider:   options.provider,
-    dtype:      options.dtype,
   }];
   this._autoStartServer = options.autoStartServer ?? true;
 }
@@ -147,7 +148,8 @@ async _startServers() {
   // For each entry in this._servers:
   //   1. Check if socketPath is already accepting connections.
   //   2. If not (and autoStartServer is true), spawn socket-model-server.js
-  //      with the entry's device/provider/dtype config as argv flags.
+  //      with the entry's device/provider config as argv flags, plus the
+  //      top-level dtype/pooling/normalize (uniform across all servers).
   //   3. Wait for {"type":"ready"} on the child's stdout.
   //   4. Push the child into this._serverProcesses[].
   // Runs all spawns concurrently (Promise.all) so multiple servers
@@ -298,27 +300,13 @@ creates the specified number of workers per server. All workers share one
 ```js
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   mode: 'socket',
+  dtype: 'fp16',         // uniform — all servers load the same quantization
+  pooling: 'mean',       // uniform
+  normalize: true,       // uniform
   servers: [
-    {
-      socketPath: '/tmp/embedeer-gpu0.sock',
-      workers: 6,
-      device: 'cuda',
-      provider: 'cuda',
-      dtype: 'fp16',
-    },
-    {
-      socketPath: '/tmp/embedeer-gpu1.sock',
-      workers: 6,
-      device: 'cuda',
-      provider: 'cuda',
-      dtype: 'fp16',
-    },
-    {
-      socketPath: '/tmp/embedeer-cpu.sock',
-      workers: 2,
-      device: 'cpu',
-      dtype: 'q8',
-    },
+    { socketPath: '/tmp/embedeer-gpu0.sock', workers: 6, device: 'cuda', provider: 'cuda' },
+    { socketPath: '/tmp/embedeer-gpu1.sock', workers: 6, device: 'cuda', provider: 'cuda' },
+    { socketPath: '/tmp/embedeer-cpu.sock',  workers: 2, device: 'cpu' },
   ],
   autoStartServer: true,
 });
@@ -345,13 +333,23 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 
 ## Options Reference
 
+**Top-level (uniform — all servers must produce identical vectors):**
+
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `'process'` | `'process'` \| `'thread'` \| `'socket'` \| `'grpc'` |
 | `concurrency` | number | numCores | Workers for single-server shorthand |
 | `batchSize` | number | 32 | Max texts per worker task |
+| `dtype` | string | `'fp32'` | Quantization applied to every server (`'fp32'`\|`'fp16'`\|`'q8'`\|`'q4'`\|`'q4f16'`\|`'auto'`) |
+| `pooling` | string | `'mean'` | Pooling strategy — must match across servers |
+| `normalize` | boolean | `true` | L2 normalisation — must match across servers |
+
+**Routing (per-server hardware config):**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
 | `socketPath` | string | auto | Single-server shorthand socket path |
-| `servers` | object[] | — | Multi-server list; each entry has `socketPath`, `workers`, `device`, `provider`, `dtype` |
+| `servers` | object[] | — | Multi-server list; each entry has `socketPath`, `workers`, `device`, `provider` |
 | `autoStartServer` | boolean | `true` | Spawn server process(es) if not reachable |
 
 ---
