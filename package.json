@@ -28,8 +28,8 @@
     "coverage": "c8 node --test test/*.test.js",
     "benchmark": "node bench/compare.js",
     "server-bench": "node bench/server-bench.js",
-    "daemon": "node src/socket-model-server.js --model Xenova/all-MiniLM-L6-v2",
-    "server": "node src/grpc-model-server.js --model Xenova/all-MiniLM-L6-v2"
+    "daemon": "node src/socket-model-server.js",
+    "server": "node src/grpc-model-server.js"
   },
   "repository": {
     "type": "git",

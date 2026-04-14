@@ -44,7 +44,7 @@ const PROTO_PATH = join(dirname(fileURLToPath(import.meta.url)), 'proto', 'embed
 const { values: args } = parseArgs({
   args: process.argv.slice(2),
   options: {
-    model:          { type: 'string' },
+    model:          { type: 'string',  default: 'Xenova/all-MiniLM-L6-v2' },
     address:        { type: 'string',  default: 'localhost:50051' },
     pooling:        { type: 'string',  default: 'mean' },
     normalize:      { type: 'boolean', default: true },
@@ -53,7 +53,7 @@ const { values: args } = parseArgs({
     provider:       { type: 'string' },
     token:          { type: 'string' },
     'cache-dir':    { type: 'string' },
-    'idle-timeout': { type: 'string' },   // ms as string; parsed to number below
+    'idle-timeout': { type: 'string' },
   },
 });
 

@@ -40,7 +40,7 @@ import { resolveProvider } from './provider-loader.js';
 const { values: args } = parseArgs({
   args: process.argv.slice(2),
   options: {
-    model:          { type: 'string' },
+    model:          { type: 'string',  default: 'Xenova/all-MiniLM-L6-v2' },
     socket:         { type: 'string' },
     pooling:        { type: 'string',  default: 'mean' },
     normalize:      { type: 'boolean', default: true },
@@ -49,7 +49,7 @@ const { values: args } = parseArgs({
     provider:       { type: 'string' },
     token:          { type: 'string' },
     'cache-dir':    { type: 'string' },
-    'idle-timeout': { type: 'string' },   // ms as string; parsed to number below
+    'idle-timeout': { type: 'string' },
   },
 });
 
