@@ -303,6 +303,8 @@ Embedeer exposes runtime knobs and helper scripts to tune throughput for your ho
 - BLAS threading: avoid oversubscription by setting `OMP_NUM_THREADS` and `MKL_NUM_THREADS` to `Math.floor(cpu_cores / concurrency)` before starting workers.
 - Device/provider: use `cuda` on Linux and `dml` (DirectML) on Windows when available; `device: 'auto'` will try providers and fall back to CPU.
 
+
+
 ### Automatic performance tuning
 
 - Automatic tuning: use `bench/grid-search.js` to sweep `batchSize`, `concurrency`, and `dtype` for your host and save results. You can generate and persist a per-user profile and apply it automatically via the `Embedder` APIs.
@@ -315,6 +317,18 @@ node bench/grid-search.js --device cpu --sample-size 200 --out bench/grid-result
 
 # GPU quick grid
 node bench/grid-search.js --device gpu --sample-size 100 --out bench/grid-results-gpu.json
+```
+
+### Programmatic performance tuning
+
+You can generate and save a per-user performance profile which `Embedder.create()` will automatically apply. This is useful to pick the best `batchSize` / `concurrency` for your machine without manual tuning.
+
+```js
+import { Embedder } from '@jsilvanus/embedeer';
+
+// Quick profile generation (writes ~/.embedeer/perf-profile.json)
+await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize: 100 });
+// Subsequent calls to Embedder.create() will auto-apply the saved profile by default.
 ```
 
 ### Server mode benchmark
@@ -340,31 +354,7 @@ Options:
   --skip-baseline        Skip process/thread baseline
 ```
 
-### Programmatic profile generation (optional)
-
-You can generate and save a per-user performance profile which `Embedder.create()` will
-automatically apply. This is useful to pick the best `batchSize` / `concurrency` for your
-machine without manual tuning.
-
-```js
-import { Embedder } from '@jsilvanus/embedeer';
-
-// Quick profile generation (writes ~/.embedeer/perf-profile.json)
-await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize: 100 });
-// Subsequent calls to Embedder.create() will auto-apply the saved profile by default.
-```
-
 ---
-
-## E2E-testing
-
-Note: HF authentication has not been tested.
-
----
-
-## Collaboration
-
-You are welcome to suggest additions or open a PR, especially if you have performance-related assistance. Opened issues are also accepted with thanks.
 
 ## License
 
