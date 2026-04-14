@@ -25,6 +25,28 @@ import { ChildProcessWorker } from './child-process-worker.js';
 import { ThreadWorker } from './thread-worker.js';
 import { registerLoadedModel, unregisterLoadedModel } from './runtime-models.js';
 
+// Small O(1) FIFO queue to avoid repeated `Array.shift()` costs when the
+// pending task queue grows large.
+class FIFOQueue {
+  constructor() {
+    this._arr = [];
+    this._head = 0;
+  }
+  push(item) { this._arr.push(item); }
+  shift() {
+    if (this._head >= this._arr.length) return undefined;
+    const item = this._arr[this._head++];
+    // Periodically trim the backing array to avoid unbounded growth.
+    if (this._head > 1024 && this._head * 2 >= this._arr.length) {
+      this._arr = this._arr.slice(this._head);
+      this._head = 0;
+    }
+    return item;
+  }
+  get length() { return this._arr.length - this._head; }
+  drain() { const rest = this._arr.slice(this._head); this._arr = []; this._head = 0; return rest; }
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROCESS_WORKER_PATH = join(__dirname, 'worker.js');
 const THREAD_WORKER_PATH  = join(__dirname, 'thread-worker-script.js');
@@ -92,8 +114,8 @@ export class WorkerPool {
     this.workers = [];
     /** @type {Array} idle workers ready to accept tasks */
     this.idleWorkers = [];
-    /** @type {Array<{id:number, texts:string[]}>} queued tasks waiting for a free worker */
-    this.pendingTasks = [];
+    /** Pending task queue (FIFO) */
+    this.pendingTasks = new FIFOQueue();
     /** @type {Map<number, {resolve:Function, reject:Function}>} */
     this.taskCallbacks = new Map();
     /**
@@ -177,7 +199,7 @@ export class WorkerPool {
     await Promise.all(this.workers.map((w) => w.terminate()));
     this.workers = [];
     this.idleWorkers = [];
-    this.pendingTasks = [];
+    this.pendingTasks = new FIFOQueue();
     this.taskCallbacks.clear();
     this._workerToTaskId.clear();
     this._initialized = false;
@@ -328,7 +350,7 @@ export class WorkerPool {
     // If all workers have crashed, reject any pending tasks rather than hanging.
     if (this.workers.length === 0 && this._initialized && this.pendingTasks.length > 0) {
       console.error('WorkerPool: all workers have crashed — rejecting all pending tasks');
-      const pending = this.pendingTasks.splice(0);
+      const pending = this.pendingTasks.drain();
       for (const task of pending) {
         const cb = this.taskCallbacks.get(task.id);
         if (cb) {
