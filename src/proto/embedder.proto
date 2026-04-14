@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package embedeer;
+
+service EmbedderService {
+  // Unary: embed a batch of texts, return all vectors at once.
+  rpc Embed (EmbedRequest) returns (EmbedResponse);
+
+  // Server-streaming: stream one vector per text as it is computed.
+  // Useful for very large batches and CLI progress display.
+  rpc EmbedStream (EmbedRequest) returns (stream EmbedChunk);
+}
+
+message EmbedRequest {
+  repeated string texts = 1;
+  int32           id    = 2;
+}
+
+message EmbedResponse {
+  int32             id         = 1;
+  repeated FloatVec embeddings = 2;
+}
+
+message EmbedChunk {
+  int32          id     = 1;
+  int32          index  = 2;
+  repeated float values = 3;
+}
+
+message FloatVec {
+  repeated float values = 1;
+}
