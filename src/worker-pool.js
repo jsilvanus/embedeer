@@ -220,8 +220,39 @@ export class WorkerPool {
         this.taskCallbacks.delete(id);
         this._workerToTaskId.delete(worker);
         this.idleWorkers.push(worker);
-        // Resolve with the most likely payload field (embeddings | text | result) or the message
-        const resultPayload = msg.embeddings ?? msg.text ?? msg.result ?? msg;
+
+        // Prefer explicit embeddings/text/result fields. Support transferred
+        // ArrayBuffers / TypedArrays coming from worker_threads by reshaping
+        // into the public `number[][]` format before resolving.
+        let resultPayload = msg.embeddings ?? msg.text ?? msg.result ?? msg;
+        const emb = msg.embeddings;
+        if (emb !== undefined) {
+          if (ArrayBuffer.isView(emb) || emb instanceof ArrayBuffer) {
+            const ab = ArrayBuffer.isView(emb) ? emb.buffer : emb;
+            const shape = msg.shape;
+            if (shape && Array.isArray(shape) && shape.length >= 2) {
+              const [rows, cols] = shape;
+              const floatView = new Float32Array(ab);
+              const out = new Array(rows);
+              for (let i = 0; i < rows; i++) {
+                const row = new Array(cols);
+                const offset = i * cols;
+                for (let j = 0; j < cols; j++) row[j] = floatView[offset + j];
+                out[i] = row;
+              }
+              resultPayload = out;
+            } else {
+              // Fallback — expose as regular Array
+              resultPayload = Array.from(new Float32Array(ab));
+            }
+          } else {
+            // embeddings is likely already nested arrays or other type — use as-is
+            resultPayload = emb;
+          }
+        } else {
+          resultPayload = msg.text ?? msg.result ?? msg;
+        }
+
         cb.resolve(resultPayload);
         this._dispatch();
       } else if (type === 'error') {
