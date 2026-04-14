@@ -204,7 +204,6 @@ async function main() {
       console.error(`grpc-model-server: bind failed — ${err.message}`);
       process.exit(1);
     }
-    server.start();
     // Signal to WorkerPool (or any parent process) that the server is ready.
     process.stdout.write('{"type":"ready"}\n');
     console.error(`grpc-model-server: listening on ${ADDRESS} (port ${port})`);

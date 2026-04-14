@@ -59,7 +59,11 @@ if (!args.model) {
 }
 
 const MODEL_NAME  = args.model;
-const SOCKET_PATH = args.socket ?? join(os.tmpdir(), `embedeer-${MODEL_NAME.replace(/\//g, '-')}.sock`);
+const SOCKET_PATH = args.socket ?? (
+  process.platform === 'win32'
+    ? `\\\\.\\pipe\\embedeer-${MODEL_NAME.replace(/\//g, '-')}`
+    : join(os.tmpdir(), `embedeer-${MODEL_NAME.replace(/\//g, '-')}.sock`)
+);
 const POOLING     = args.pooling;
 const NORMALIZE   = args.normalize;
 const IDLE_MS     = args['idle-timeout'] ? Number(args['idle-timeout']) : null;

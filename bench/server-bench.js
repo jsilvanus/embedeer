@@ -21,6 +21,7 @@
  */
 
 import net from 'net';
+import os from 'os';
 import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -233,10 +234,9 @@ function printTable(results) {
 // ── Runners ───────────────────────────────────────────────────────────────────
 
 async function runSocket() {
-  const socketPath = join(
-    (await import('os')).default.tmpdir(),
-    `embedeer-bench-${Date.now()}.sock`,
-  );
+  const socketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\embedeer-bench-${Date.now()}`
+    : join(os.tmpdir(), `embedeer-bench-${Date.now()}.sock`);
 
   process.stderr.write('Starting socket server…\n');
   const { child, startupMs } = await spawnServer('socket-model-server.js', [
