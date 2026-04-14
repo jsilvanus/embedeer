@@ -10,7 +10,7 @@
 
 A Node.js tool for generating text embeddings using [transformers.js](https://github.com/huggingface/transformers.js) with ONNX models from [Hugging Face](https://huggingface.co/models).
 
-Supports **batched** input, **parallel** execution, isolated **child-process** workers (default) or **in-process threads**, quantization, optional GPU acceleration, and Hugging Face auth.
+Supports **batched** input, **parallel** execution, isolated **child-process** workers (default), **in-process threads**, a shared **socket daemon** (one model across multiple OS processes), and a **gRPC server** (HTTP/2 + protobuf, remote-ready), quantization, optional GPU acceleration, and Hugging Face auth.
 
 ---
 
@@ -19,6 +19,10 @@ Supports **batched** input, **parallel** execution, isolated **child-process** w
 - Downloads any Hugging Face feature-extraction model on first use (cached in `~/.embedeer/models`)
 - **Isolated processes** (default) — a worker crash cannot bring down the caller
 - **In-process threads** — opt-in via `mode: 'thread'` for lower overhead
+- **Socket daemon** — `mode: 'socket'` runs one persistent server shared across multiple OS processes; one model copy in RAM regardless of client count
+- **gRPC server** — `mode: 'grpc'` exposes the model as a typed HTTP/2 service; works locally or remotely, supports server-streaming for large batches
+- **Multi-server load balancing** — point a WorkerPool at multiple servers (e.g. 2 GPU + 1 CPU); the idle-worker queue distributes work naturally
+- **Model idle offload** — servers optionally release GPU/CPU memory after inactivity (`--idle-timeout`) and reload on next request
 - **Sequential** execution when `concurrency: 1`
 - Configurable batch size and concurrency
 - **GPU acceleration** — optional CUDA (Linux x64) and DirectML (Windows x64), no extra packages needed
@@ -37,17 +41,21 @@ embed(texts)
   │
   └─ Promise.all(batches) ──► WorkerPool
                                  │
-                                 ├─ [process mode] ChildProcessWorker 0
-                                 │   resolveProvider(device, provider)
-                                 │   → pipeline('feature-extraction', model, { device: 'cuda' })
-                                 │   → embed batch A
+                                 ├─ [process mode] ChildProcessWorker 0  → own model copy
+                                 ├─ [process mode] ChildProcessWorker 1  → own model copy
                                  │
-                                 └─ [process mode] ChildProcessWorker 1
-                                     resolveProvider(device, provider)
-                                     → pipeline(...) → embed batch B
+                                 ├─ [thread mode]  ThreadWorker 0        → own model copy
+                                 │
+                                 ├─ [socket mode]  SocketWorker 0  ──┐
+                                 ├─ [socket mode]  SocketWorker 1  ──┼──► socket-model-server (one shared model)
+                                 │                                   │    also connectable from other OS processes
+                                 │
+                                 └─ [grpc mode]    GrpcWorker 0  ──┐
+                                    [grpc mode]    GrpcWorker 1  ──┼──► grpc-model-server (one shared model)
+                                                                   │    works locally or over the network
 ```
 
-Workers load the model **once** at startup and reuse it for all batches. (N workers means N loaded models in memory!) Provider activation happens per-worker before the pipeline is created.
+In `process` and `thread` modes, each worker loads its own model copy — N workers means N models in memory. In `socket` and `grpc` modes, one server process holds the model and all workers are lightweight client connections to it.
 
 --- 
 
@@ -127,6 +135,88 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   provider: 'cuda',  // 'cuda' | 'dml'
 });
+```
+
+### Socket daemon mode
+
+Run one persistent model server shared across multiple OS processes. Any process that knows the socket path can connect — useful when several services on the same machine all need embeddings.
+
+```bash
+# Start the daemon (stays running; model loads once)
+npm run daemon
+# or with a custom model:
+node src/socket-model-server.js --model Xenova/all-MiniLM-L6-v2 --socket /tmp/emb.sock
+
+# Optional: offload model from memory after 10 minutes of inactivity
+node src/socket-model-server.js --model Xenova/all-MiniLM-L6-v2 --idle-timeout 600000
+```
+
+Connect from any number of processes:
+
+```js
+// In process A (web server) and process B (background worker) — same API
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'socket',
+  socketPath: '/tmp/emb.sock',
+  autoStartServer: false,   // daemon is already running
+});
+const vectors = await embedder.embed(['Hello world']);
+await embedder.destroy();   // closes connection; daemon keeps running
+```
+
+One model in RAM serves all connected processes. `autoStartServer: true` (the default) spawns the server automatically and shuts it down with `embedder.destroy()`.
+
+### gRPC server mode
+
+Run the model as a gRPC service (HTTP/2 + Protocol Buffers). Works locally or over a network, and supports any language with a gRPC client.
+
+```bash
+# Start the gRPC server
+npm run server
+# or with custom options:
+node src/grpc-model-server.js \
+  --model Xenova/all-MiniLM-L6-v2 \
+  --address 0.0.0.0:50051 \
+  --dtype fp16 \
+  --idle-timeout 600000
+```
+
+Connect from Node.js:
+
+```js
+// Local server (auto-started)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'grpc',
+  grpcAddress: 'localhost:50051',
+});
+
+// Remote server
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'grpc',
+  grpcAddress: '10.0.1.42:50051',
+  autoStartServer: false,
+});
+
+const vectors = await embedder.embed(['Hello world']);
+await embedder.destroy();
+```
+
+### Multi-server load balancing
+
+Point a WorkerPool at multiple servers. The idle-worker queue acts as a natural load balancer — workers on faster servers (GPU) finish sooner and pick up proportionally more tasks.
+
+```js
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'grpc',               // or 'socket'
+  dtype: 'fp16',              // uniform across all servers
+  servers: [
+    { address: 'localhost:50051', workers: 6, device: 'cuda', provider: 'cuda' },
+    { address: 'localhost:50052', workers: 6, device: 'cuda', provider: 'cuda' },
+    { address: 'localhost:50053', workers: 2, device: 'cpu' },
+  ],
+  autoStartServer: true,
+});
+// 14 workers total; GPU servers receive ~5× more requests than the CPU server
 ```
 
 ---
@@ -304,6 +394,29 @@ node bench/grid-search.js --device cpu --sample-size 200 --out bench/grid-result
 
 # GPU quick grid
 node bench/grid-search.js --device gpu --sample-size 100 --out bench/grid-results-gpu.json
+```
+
+### Server mode benchmark
+
+Compare socket and gRPC server throughput against the process/thread baseline:
+
+```bash
+npm run server-bench
+# or with options:
+node bench/server-bench.js --model Xenova/all-MiniLM-L6-v2 --batch-size 32 --sample-size 500
+```
+
+The benchmark starts each server as a subprocess, waits for it to load the model, runs embeddings, then shuts it down. Reports startup time (spawn → ready) separately from embedding throughput so you can see the fixed cost of model loading vs. steady-state performance.
+
+```
+Options:
+  --model       <name>   HF model identifier  (default: Xenova/all-MiniLM-L6-v2)
+  --batch-size  <n>      Texts per request     (default: 32)
+  --dtype       <type>   Quantization dtype    (default: none)
+  --sample-size <n>      Number of texts       (default: 200)
+  --skip-socket          Skip socket runner
+  --skip-grpc            Skip gRPC runner
+  --skip-baseline        Skip process/thread baseline
 ```
 
 ### Programmatic profile generation (optional)
