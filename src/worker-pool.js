@@ -25,6 +25,28 @@ import { ChildProcessWorker } from './child-process-worker.js';
 import { ThreadWorker } from './thread-worker.js';
 import { registerLoadedModel, unregisterLoadedModel } from './runtime-models.js';
 
+// Small O(1) FIFO queue to avoid repeated `Array.shift()` costs when the
+// pending task queue grows large.
+class FIFOQueue {
+  constructor() {
+    this._arr = [];
+    this._head = 0;
+  }
+  push(item) { this._arr.push(item); }
+  shift() {
+    if (this._head >= this._arr.length) return undefined;
+    const item = this._arr[this._head++];
+    // Periodically trim the backing array to avoid unbounded growth.
+    if (this._head > 1024 && this._head * 2 >= this._arr.length) {
+      this._arr = this._arr.slice(this._head);
+      this._head = 0;
+    }
+    return item;
+  }
+  get length() { return this._arr.length - this._head; }
+  drain() { const rest = this._arr.slice(this._head); this._arr = []; this._head = 0; return rest; }
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROCESS_WORKER_PATH = join(__dirname, 'worker.js');
 const THREAD_WORKER_PATH  = join(__dirname, 'thread-worker-script.js');
@@ -92,8 +114,8 @@ export class WorkerPool {
     this.workers = [];
     /** @type {Array} idle workers ready to accept tasks */
     this.idleWorkers = [];
-    /** @type {Array<{id:number, texts:string[]}>} queued tasks waiting for a free worker */
-    this.pendingTasks = [];
+    /** Pending task queue (FIFO) */
+    this.pendingTasks = new FIFOQueue();
     /** @type {Map<number, {resolve:Function, reject:Function}>} */
     this.taskCallbacks = new Map();
     /**
@@ -177,7 +199,7 @@ export class WorkerPool {
     await Promise.all(this.workers.map((w) => w.terminate()));
     this.workers = [];
     this.idleWorkers = [];
-    this.pendingTasks = [];
+    this.pendingTasks = new FIFOQueue();
     this.taskCallbacks.clear();
     this._workerToTaskId.clear();
     this._initialized = false;
@@ -220,8 +242,39 @@ export class WorkerPool {
         this.taskCallbacks.delete(id);
         this._workerToTaskId.delete(worker);
         this.idleWorkers.push(worker);
-        // Resolve with the most likely payload field (embeddings | text | result) or the message
-        const resultPayload = msg.embeddings ?? msg.text ?? msg.result ?? msg;
+
+        // Prefer explicit embeddings/text/result fields. Support transferred
+        // ArrayBuffers / TypedArrays coming from worker_threads by reshaping
+        // into the public `number[][]` format before resolving.
+        let resultPayload = msg.embeddings ?? msg.text ?? msg.result ?? msg;
+        const emb = msg.embeddings;
+        if (emb !== undefined) {
+          if (ArrayBuffer.isView(emb) || emb instanceof ArrayBuffer) {
+            const ab = ArrayBuffer.isView(emb) ? emb.buffer : emb;
+            const shape = msg.shape;
+            if (shape && Array.isArray(shape) && shape.length >= 2) {
+              const [rows, cols] = shape;
+              const floatView = new Float32Array(ab);
+              const out = new Array(rows);
+              for (let i = 0; i < rows; i++) {
+                const row = new Array(cols);
+                const offset = i * cols;
+                for (let j = 0; j < cols; j++) row[j] = floatView[offset + j];
+                out[i] = row;
+              }
+              resultPayload = out;
+            } else {
+              // Fallback — expose as regular Array
+              resultPayload = Array.from(new Float32Array(ab));
+            }
+          } else {
+            // embeddings is likely already nested arrays or other type — use as-is
+            resultPayload = emb;
+          }
+        } else {
+          resultPayload = msg.text ?? msg.result ?? msg;
+        }
+
         cb.resolve(resultPayload);
         this._dispatch();
       } else if (type === 'error') {
@@ -297,7 +350,7 @@ export class WorkerPool {
     // If all workers have crashed, reject any pending tasks rather than hanging.
     if (this.workers.length === 0 && this._initialized && this.pendingTasks.length > 0) {
       console.error('WorkerPool: all workers have crashed — rejecting all pending tasks');
-      const pending = this.pendingTasks.splice(0);
+      const pending = this.pendingTasks.drain();
       for (const task of pending) {
         const cb = this.taskCallbacks.get(task.id);
         if (cb) {

@@ -45,7 +45,31 @@ parentPort.on('message', async (msg) => {
   if (msg.type !== 'task') return;
   try {
     const output = await extractor(msg.texts, { pooling, normalize });
-    parentPort.postMessage({ type: 'result', id: msg.id, embeddings: output.tolist() });
+    // Prefer a JS nested-array representation if that's what the extractor
+    // exposes via `tolist()`. To avoid expensive structured-clone copies
+    // across worker thread boundaries we flatten into a Float32Array here
+    // and transfer the underlying ArrayBuffer to the parent (zero-copy).
+    const list = (typeof output?.tolist === 'function') ? output.tolist() : output;
+
+    // If extractor already returned a typed view / ArrayBuffer, transfer it.
+    if (ArrayBuffer.isView(list) || list instanceof ArrayBuffer) {
+      const ab = ArrayBuffer.isView(list) ? list.buffer : list;
+      parentPort.postMessage({ type: 'result', id: msg.id, embeddings: ab, shape: [list.length] }, [ab]);
+      return;
+    }
+
+    // Expect nested arrays: [rows][cols]
+    const rows = Array.isArray(list) ? list.length : 0;
+    const cols = rows > 0 && Array.isArray(list[0]) ? list[0].length : 0;
+    const flat = new Float32Array(rows * cols);
+    let k = 0;
+    for (let i = 0; i < rows; i++) {
+      const row = list[i];
+      for (let j = 0; j < cols; j++) {
+        flat[k++] = Number(row[j]);
+      }
+    }
+    parentPort.postMessage({ type: 'result', id: msg.id, embeddings: flat.buffer, shape: [rows, cols] }, [flat.buffer]);
   } catch (err) {
     parentPort.postMessage({ type: 'error', id: msg.id, error: err.message });
   }
