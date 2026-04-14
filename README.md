@@ -61,32 +61,11 @@ In `process` and `thread` modes, each worker loads its own model copy — N work
 
 ## Installation
 
-```bash
-npm install @jsilvanus/embedeer
-```
+**TypeScript:** The package includes TypeScript declarations so imports are typed automatically.
 
-The package includes TypeScript declarations so imports are typed automatically.
+**GPU acceleration:** (CUDA on Linux x64, DirectML on Windows x64) is built into `onnxruntime-node` which ships as a transitive dependency. No additional packages are required. **For CUDA on Linux x64** you also need the CUDA 12 system libraries: `sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12`
 
-GPU acceleration (CUDA on Linux x64, DirectML on Windows x64) is built into `onnxruntime-node`
-which ships as a transitive dependency. No additional packages are required. **For CUDA on Linux x64** you also need the CUDA 12 system libraries: `sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12`
-
-### gRPC dependencies (optional)
-
-`@grpc/grpc-js` and `@grpc/proto-loader` are listed as `optionalDependencies` — installed by default but skippable. They are only loaded when `mode: 'grpc'` is actually used (lazy import at runtime).
-
-```bash
-# Skip gRPC packages entirely (process/thread/socket modes still work)
-npm install @jsilvanus/embedeer --omit=optional
-
-# Re-add them later if you want gRPC mode
-npm install @grpc/grpc-js @grpc/proto-loader
-```
-
-If you use `mode: 'grpc'` without the packages installed, you get a clear error:
-```
-mode:'grpc' requires optional peer packages that are not installed.
-Install them with: npm install @grpc/grpc-js @grpc/proto-loader
-```
+**gRPC:**`@grpc/grpc-js` and `@grpc/proto-loader` are listed as `optionalDependencies` — installed by default but skippable with `--omit=optional` in `npm install`. They are only loaded when `mode: 'grpc'` is actually used (lazy import at runtime). 
 
 ## Using the package
 
