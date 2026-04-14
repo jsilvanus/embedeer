@@ -142,14 +142,29 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 Run one persistent model server shared across multiple OS processes. Any process that knows the socket path can connect — useful when several services on the same machine all need embeddings.
 
 ```bash
-# Start the daemon (stays running; model loads once)
+# Start the daemon — default model (Xenova/all-MiniLM-L6-v2), CPU, no idle offload
 npm run daemon
-# or with a custom model:
-node src/socket-model-server.js --model Xenova/all-MiniLM-L6-v2 --socket /tmp/emb.sock
 
-# Optional: offload model from memory after 10 minutes of inactivity
-node src/socket-model-server.js --model Xenova/all-MiniLM-L6-v2 --idle-timeout 600000
+# Pass arguments after --
+npm run daemon -- --model nomic-ai/nomic-embed-text-v1
+npm run daemon -- --socket /tmp/emb.sock
+npm run daemon -- --idle-timeout 600000          # offload after 10 min idle
+npm run daemon -- --dtype q8 --device gpu --idle-timeout 300000
+npm run daemon -- --no-normalize --pooling cls
 ```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--model` | `Xenova/all-MiniLM-L6-v2` | Hugging Face model identifier |
+| `--socket` | auto (`/tmp/embedeer-<model>.sock`) | Unix socket path |
+| `--pooling` | `mean` | `mean` \| `cls` \| `none` |
+| `--normalize` / `--no-normalize` | enabled | L2-normalise output vectors |
+| `--dtype` | — | Quantization: `fp32` \| `fp16` \| `q8` \| `q4` \| `q4f16` \| `auto` |
+| `--device` | `cpu` | `cpu` \| `gpu` \| `auto` |
+| `--provider` | — | `cuda` \| `dml` |
+| `--token` | — | Hugging Face API token (also reads `HF_TOKEN`) |
+| `--cache-dir` | `~/.embedeer/models` | Model cache directory |
+| `--idle-timeout` | — | Offload model after N ms of inactivity; reload on next request |
 
 Connect from any number of processes:
 
@@ -171,15 +186,29 @@ One model in RAM serves all connected processes. `autoStartServer: true` (the de
 Run the model as a gRPC service (HTTP/2 + Protocol Buffers). Works locally or over a network, and supports any language with a gRPC client.
 
 ```bash
-# Start the gRPC server
+# Start the server — default model (Xenova/all-MiniLM-L6-v2), localhost:50051
 npm run server
-# or with custom options:
-node src/grpc-model-server.js \
-  --model Xenova/all-MiniLM-L6-v2 \
-  --address 0.0.0.0:50051 \
-  --dtype fp16 \
-  --idle-timeout 600000
+
+# Pass arguments after --
+npm run server -- --model nomic-ai/nomic-embed-text-v1
+npm run server -- --address 0.0.0.0:50051        # listen on all interfaces
+npm run server -- --dtype fp16 --device gpu
+npm run server -- --idle-timeout 600000           # offload after 10 min idle
+npm run server -- --model my/model --dtype q8 --device gpu --idle-timeout 300000
 ```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--model` | `Xenova/all-MiniLM-L6-v2` | Hugging Face model identifier |
+| `--address` | `localhost:50051` | Bind address (`host:port`) |
+| `--pooling` | `mean` | `mean` \| `cls` \| `none` |
+| `--normalize` / `--no-normalize` | enabled | L2-normalise output vectors |
+| `--dtype` | — | Quantization: `fp32` \| `fp16` \| `q8` \| `q4` \| `q4f16` \| `auto` |
+| `--device` | `cpu` | `cpu` \| `gpu` \| `auto` |
+| `--provider` | — | `cuda` \| `dml` |
+| `--token` | — | Hugging Face API token (also reads `HF_TOKEN`) |
+| `--cache-dir` | `~/.embedeer/models` | Model cache directory |
+| `--idle-timeout` | — | Offload model after N ms of inactivity; reload on next request |
 
 Connect from Node.js:
 
