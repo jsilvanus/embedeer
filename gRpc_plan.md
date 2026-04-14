@@ -130,31 +130,75 @@ requests via gRPC instead of IPC.
 
 **Responsibilities:**
 1. Parse config from `process.argv`: `modelName`, `pooling`, `normalize`,
-   `token`, `dtype`, `cacheDir`, `device`, `provider`, `grpcAddress`.
+   `token`, `dtype`, `cacheDir`, `device`, `provider`, `grpcAddress`,
+   `idleTimeout`.
 2. Load the model via `@huggingface/transformers` pipeline.
 3. Write `{"type":"ready"}\n` to stdout once the model is loaded and the
    server is bound — `WorkerPool` waits for this before creating workers.
 4. Register the `EmbedderService` implementation and start listening.
+5. If `idleTimeout` is set, offload the model after that many milliseconds
+   of inactivity and reload it transparently on the next incoming RPC.
+
+**Idle timeout — model offload/reload:**
+
+`Pipeline.dispose()` cascades through `model.dispose()` to
+`session.release()` on every ONNX Runtime session, cleanly freeing GPU VRAM
+and CPU RAM. Reload uses the same `pipeline()` call as startup.
+
+```js
+let extractor = null;
+let lastRequestTime = Date.now();
+
+async function ensureLoaded() {
+  if (extractor) return;
+  console.error('grpc-model-server: reloading model after idle offload');
+  extractor = await pipeline('feature-extraction', modelName, pipelineOpts);
+}
+
+if (args['idle-timeout']) {
+  const idleMs = Number(args['idle-timeout']);
+  setInterval(async () => {
+    if (extractor && Date.now() - lastRequestTime > idleMs) {
+      console.error('grpc-model-server: idle timeout — offloading model');
+      await extractor.dispose();   // Pipeline → model.dispose() → session.release()
+      extractor = null;
+    }
+  }, Math.min(idleMs, 60_000));
+}
+```
+
+Each RPC handler calls `await ensureLoaded()` and updates `lastRequestTime`
+before running inference. Concurrent RPCs that arrive during a reload all
+await the same load — no duplicate pipeline construction.
 
 **`Embed` handler (unary):**
 ```js
-handleEmbed(call, callback) {
-  const { texts, id } = call.request;
-  extractor(texts, { pooling, normalize })
-    .then(output => callback(null, {
-      id,
-      embeddings: output.tolist().map(v => ({ values: v })),
-    }))
-    .catch(err => callback({ code: grpc.status.INTERNAL, message: err.message }));
+async function handleEmbed(call, callback) {
+  try {
+    await ensureLoaded();
+    lastRequestTime = Date.now();
+    const { texts, id } = call.request;
+    const output = await extractor(texts, { pooling, normalize });
+    callback(null, { id, embeddings: output.tolist().map(v => ({ values: v })) });
+  } catch (err) {
+    callback({ code: grpc.status.INTERNAL, message: err.message });
+  }
 }
 ```
 
 **`EmbedStream` handler (server-streaming):**
 ```js
-handleEmbedStream(call) {
+async function handleEmbedStream(call) {
+  await ensureLoaded();
+  lastRequestTime = Date.now();
   const { texts, id } = call.request;
-  // Process texts in sub-batches; call.write({ id, index, values })
-  // for each completed vector; call.end() when all are done.
+  for (let i = 0; i < texts.length; i++) {
+    try {
+      const output = await extractor([texts[i]], { pooling, normalize });
+      call.write({ id, index: i, values: output.tolist()[0] });
+    } catch (err) { call.destroy(err); return; }
+  }
+  call.end();
 }
 ```
 
@@ -162,7 +206,8 @@ Protobuf `repeated float` maps directly to a JS plain array — no conversion
 beyond the `.tolist()` call already used in `worker.js`.
 
 **Graceful shutdown:** On `SIGTERM`/`SIGINT` call `server.tryShutdown(cb)`,
-which drains in-flight RPCs before closing.
+which drains in-flight RPCs, then `await extractor?.dispose()` before
+`process.exit(0)`.
 
 ---
 
@@ -509,6 +554,7 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 | `servers` | object[] | — | Multi-server list; each entry has `address`, `workers`, `device`, `provider` |
 | `grpcLoadBalancing` | string | — | gRPC LB policy — `'round_robin'` for built-in equal-weight distribution |
 | `autoStartServer` | boolean | `true` | Spawn server process(es) if not reachable |
+| `idleTimeout` | number | — | Milliseconds of inactivity before offloading the model (`--idle-timeout` on the server CLI). `null`/omitted = never offload |
 
 ---
 

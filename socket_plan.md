@@ -81,7 +81,8 @@ instead of `process.on('message')`.
 
 **Responsibilities:**
 1. Parse config from `process.argv`: `modelName`, `pooling`, `normalize`,
-   `token`, `dtype`, `cacheDir`, `device`, `provider`, `socketPath`.
+   `token`, `dtype`, `cacheDir`, `device`, `provider`, `socketPath`,
+   `idleTimeout`.
 2. Load the model via `@huggingface/transformers` pipeline (same logic as
    `worker.js`).
 3. Write `{"type":"ready"}\n` to stdout so the spawning `WorkerPool` knows
@@ -94,8 +95,48 @@ instead of `process.on('message')`.
    the extractor, write the result back to the originating connection.
 7. On connection close, reject any queued tasks from that connection rather
    than writing results to a closed socket.
+8. If `idleTimeout` is set, offload the model after that many milliseconds
+   of inactivity and reload it transparently on the next incoming task.
 
-**Message protocol (NDJSON — each message is one line):**
+**Idle timeout — model offload/reload:**
+
+`Pipeline.dispose()` cascades through `model.dispose()` to
+`session.release()` on every ONNX Runtime session, cleanly freeing GPU VRAM
+and CPU RAM. Reload uses the same `pipeline()` call as startup.
+
+```js
+let extractor = null;
+let lastRequestTime = Date.now();
+
+async function ensureLoaded() {
+  if (extractor) return;
+  console.error('socket-model-server: reloading model after idle offload');
+  extractor = await pipeline('feature-extraction', modelName, pipelineOpts);
+}
+
+if (args['idle-timeout']) {
+  const idleMs = Number(args['idle-timeout']);
+  setInterval(async () => {
+    if (extractor && Date.now() - lastRequestTime > idleMs) {
+      console.error('socket-model-server: idle timeout — offloading model');
+      await extractor.dispose();   // Pipeline → model.dispose() → session.release()
+      extractor = null;
+    }
+  }, Math.min(idleMs, 60_000));   // check at most every minute
+}
+
+// In processNext(), before running the extractor:
+async function processNext() {
+  if (busy || queue.length === 0) return;
+  busy = true;
+  await ensureLoaded();        // no-op if already loaded; reloads if offloaded
+  lastRequestTime = Date.now();
+  // ... run task as normal
+}
+```
+
+Requests that arrive while reloading queue normally — the first caller
+after an idle period sees reload latency; all others are unaffected.
 
 ```
 client → server:  {"type":"task","id":0,"texts":["hello","world"]}\n
@@ -107,7 +148,8 @@ server → client:  {"type":"result","id":0,"embeddings":[[...],[...]]}\n
 pending promises — same convention as the existing IPC protocol.
 
 **Graceful shutdown:** On `SIGTERM`/`SIGINT`, stop accepting new connections,
-drain the in-progress task, then `server.close()` and `process.exit(0)`.
+drain the in-progress task, call `extractor?.dispose()` if loaded, then
+`server.close()` and `process.exit(0)`.
 
 ---
 
@@ -413,6 +455,7 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 | `socketPath` | string | auto | Single-server shorthand socket path |
 | `servers` | object[] | — | Multi-server list; each entry has `socketPath`, `workers`, `device`, `provider` |
 | `autoStartServer` | boolean | `true` | Spawn server process(es) if not reachable |
+| `idleTimeout` | number | — | Milliseconds of inactivity before offloading the model (`--idle-timeout` on the server CLI). `null`/omitted = never offload |
 
 ---
 
