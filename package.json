@@ -26,7 +26,10 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "coverage": "c8 node --test test/*.test.js",
-    "benchmark": "node bench/compare.js"
+    "benchmark": "node bench/compare.js",
+    "server-bench": "node bench/server-bench.js",
+    "daemon": "node src/socket-model-server.js",
+    "server": "node src/grpc-model-server.js"
   },
   "repository": {
     "type": "git",
@@ -57,6 +60,10 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1"
+  },
+  "optionalDependencies": {
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

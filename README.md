@@ -10,7 +10,7 @@
 
 A Node.js tool for generating text embeddings using [transformers.js](https://github.com/huggingface/transformers.js) with ONNX models from [Hugging Face](https://huggingface.co/models).
 
-Supports **batched** input, **parallel** execution, isolated **child-process** workers (default) or **in-process threads**, quantization, optional GPU acceleration, and Hugging Face auth.
+Supports **batched** input, **parallel** execution, isolated **child-process** workers (default), **in-process threads**, a shared **socket daemon** (one model across multiple OS processes), and a **gRPC server** (HTTP/2 + protobuf, remote-ready), quantization, optional GPU acceleration, and Hugging Face auth.
 
 ---
 
@@ -19,6 +19,10 @@ Supports **batched** input, **parallel** execution, isolated **child-process** w
 - Downloads any Hugging Face feature-extraction model on first use (cached in `~/.embedeer/models`)
 - **Isolated processes** (default) — a worker crash cannot bring down the caller
 - **In-process threads** — opt-in via `mode: 'thread'` for lower overhead
+- **Socket daemon** — `mode: 'socket'` runs one persistent server shared across multiple OS processes; one model copy in RAM regardless of client count
+- **gRPC server** — `mode: 'grpc'` exposes the model as a typed HTTP/2 service; works locally or remotely, supports server-streaming for large batches
+- **Multi-server load balancing** — point a WorkerPool at multiple servers (e.g. 2 GPU + 1 CPU); the idle-worker queue distributes work naturally
+- **Model idle offload** — servers optionally release GPU/CPU memory after inactivity (`--idle-timeout`) and reload on next request
 - **Sequential** execution when `concurrency: 1`
 - Configurable batch size and concurrency
 - **GPU acceleration** — optional CUDA (Linux x64) and DirectML (Windows x64), no extra packages needed
@@ -37,43 +41,40 @@ embed(texts)
   │
   └─ Promise.all(batches) ──► WorkerPool
                                  │
-                                 ├─ [process mode] ChildProcessWorker 0
-                                 │   resolveProvider(device, provider)
-                                 │   → pipeline('feature-extraction', model, { device: 'cuda' })
-                                 │   → embed batch A
+                                 ├─ [process mode] ChildProcessWorker 0  → own model copy
+                                 ├─ [process mode] ChildProcessWorker 1  → own model copy
                                  │
-                                 └─ [process mode] ChildProcessWorker 1
-                                     resolveProvider(device, provider)
-                                     → pipeline(...) → embed batch B
+                                 ├─ [thread mode]  ThreadWorker 0        → own model copy
+                                 │
+                                 ├─ [socket mode]  SocketWorker 0  ──┐
+                                 ├─ [socket mode]  SocketWorker 1  ──┼──► socket-model-server (one shared model)
+                                 │                                   │    also connectable from other OS processes
+                                 │
+                                 └─ [grpc mode]    GrpcWorker 0  ──┐
+                                    [grpc mode]    GrpcWorker 1  ──┼──► grpc-model-server (one shared model)
+                                                                   │    works locally or over the network
 ```
 
-Workers load the model **once** at startup and reuse it for all batches. (N workers means N loaded models in memory!) Provider activation happens per-worker before the pipeline is created.
+In `process` and `thread` modes, each worker loads its own model copy — N workers means N models in memory. In `socket` and `grpc` modes, one server process holds the model and all workers are lightweight client connections to it.
 
 --- 
 
 ## Installation
 
-```bash
-npm install @jsilvanus/embedeer
-```
+**TypeScript:** The package includes TypeScript declarations so imports are typed automatically.
 
-GPU acceleration (CUDA on Linux x64, DirectML on Windows x64) is built into `onnxruntime-node`
-which ships as a transitive dependency. No additional packages are required.
+**GPU acceleration:** (CUDA on Linux x64, DirectML on Windows x64) is built into `onnxruntime-node` which ships as a transitive dependency. No additional packages are required. **For CUDA on Linux x64** you also need the CUDA 12 system libraries: `sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12`
 
-**For CUDA on Linux x64** you also need the CUDA 12 system libraries:
+**gRPC:**`@grpc/grpc-js` and `@grpc/proto-loader` are listed as `optionalDependencies` — installed by default but skippable with `--omit=optional` in `npm install`. They are only loaded when `mode: 'grpc'` is actually used (lazy import at runtime). 
 
-```bash
-# Ubuntu / Debian
-sudo apt install cuda-toolkit-12-6 libcudnn9-cuda-12
-```
+## Using the package
 
-## Input Sources
-
-### Embed texts (CPU — default)
+### Embed texts
 
 ```js
 import { Embedder } from '@jsilvanus/embedeer';
 
+// The default is CPU embedder
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   batchSize:   32,          // texts per worker task   (default: 32)
   concurrency: 2,           // parallel workers        (default: 2)
@@ -85,151 +86,166 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   cacheDir:   '/my/cache',  // override model cache    (default: ~/.embedeer/models)
 });
 
+// OR: Auto-detect GPU (falls back to CPU if no provider is installed)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  device: 'auto',
+});
+
+// OR: Require GPU (throws if no provider is available)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  device: 'gpu',
+});
+
+// OR: Explicitly select an execution provider
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  provider: 'cuda',  // 'cuda' | 'dml'
+});
+
+// .embed is the way to get the embeddings.
 const vectors = await embedder.embed(['Hello world', 'Foo bar baz']);
 // → number[][]  (one 384-dim vector per text for all-MiniLM-L6-v2)
 
 await embedder.destroy(); // shut down worker processes
 ```
 
-### TypeScript example
+### Socket daemon mode
 
-The package includes TypeScript declarations so imports are typed automatically.
+Run one persistent model server shared across multiple OS processes. Any process that knows the socket path can connect — useful when several services on the same machine all need embeddings.
 
-```ts
-import { Embedder } from '@jsilvanus/embedeer';
+```bash
+# Start the daemon — default model (Xenova/all-MiniLM-L6-v2), CPU, no idle offload
+npm run daemon
 
-async function main() {
-  const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', { batchSize: 32, concurrency: 2 });
-  const vectors = await embedder.embed(['Hello world', 'Foo bar baz']);
-  // vectors: number[][]
-  await embedder.destroy();
-}
-
-main().catch(console.error);
+# Pass arguments after --
+npm run daemon -- --model nomic-ai/nomic-embed-text-v1
 ```
 
-### Embed texts with GPU
+| Argument | Default | Description |
+|---|---|---|
+| `--model` | `Xenova/all-MiniLM-L6-v2` | Hugging Face model identifier |
+| `--socket` | auto (`/tmp/embedeer-<model>.sock`) | Unix socket path |
+| `--pooling` | `mean` | `mean` \| `cls` \| `none` |
+| `--normalize` / `--no-normalize` | enabled | L2-normalise output vectors |
+| `--dtype` | — | Quantization: `fp32` \| `fp16` \| `q8` \| `q4` \| `q4f16` \| `auto` |
+| `--device` | `cpu` | `cpu` \| `gpu` \| `auto` |
+| `--provider` | — | `cuda` \| `dml` |
+| `--token` | — | Hugging Face API token (also reads `HF_TOKEN`) |
+| `--cache-dir` | `~/.embedeer/models` | Model cache directory |
+| `--idle-timeout` | — | Offload model after N ms of inactivity; reload on next request |
+
+Connect from any number of processes:
 
 ```js
-import { Embedder } from '@jsilvanus/embedeer';
-
-// Auto-detect GPU (falls back to CPU if no provider is installed)
+// In process A (web server) and process B (background worker) — same API
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
-  device: 'auto',
+  mode: 'socket',
+  socketPath: '/tmp/emb.sock',
+  autoStartServer: false,   // daemon is already running
 });
-
-// Require GPU (throws if no provider is available)
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
-  device: 'gpu',
-});
-
-// Explicitly select an execution provider
-const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
-  provider: 'cuda',  // 'cuda' | 'dml'
-});
+const vectors = await embedder.embed(['Hello world']);
+await embedder.destroy();   // closes connection; daemon keeps running
 ```
 
----
+One model in RAM serves all connected processes. `autoStartServer: true` (the default) spawns the server automatically and shuts it down with `embedder.destroy()`.
+
+### gRPC server mode
+
+Run the model as a gRPC service (HTTP/2 + Protocol Buffers). Works locally or over a network.
+
+```bash
+# Start the server — default model (Xenova/all-MiniLM-L6-v2), localhost:50051
+npm run server
+
+# Pass arguments after --
+npm run server -- --address 0.0.0.0:50051        # listen on all interfaces
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--model` | `Xenova/all-MiniLM-L6-v2` | Hugging Face model identifier |
+| `--address` | `localhost:50051` | Bind address (`host:port`) |
+| `--pooling` | `mean` | `mean` \| `cls` \| `none` |
+| `--normalize` / `--no-normalize` | enabled | L2-normalise output vectors |
+| `--dtype` | — | Quantization: `fp32` \| `fp16` \| `q8` \| `q4` \| `q4f16` \| `auto` |
+| `--device` | `cpu` | `cpu` \| `gpu` \| `auto` |
+| `--provider` | — | `cuda` \| `dml` |
+| `--token` | — | Hugging Face API token (also reads `HF_TOKEN`) |
+| `--cache-dir` | `~/.embedeer/models` | Model cache directory |
+| `--idle-timeout` | — | Offload model after N ms of inactivity; reload on next request |
+
+Connect from Node.js using this package's client:
+
+```js
+// Auto-start a local server (dies with process) and you can then send it data
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'grpc',
+  grpcAddress: 'localhost:50051',
+});
+
+// Connect this client into a remote server
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'grpc',
+  grpcAddress: '10.0.1.42:50051',
+  autoStartServer: false,
+});
+
+const vectors = await embedder.embed(['Hello world']);
+await embedder.destroy();
+```
+
+### Multi-server load balancing
+
+Point a WorkerPool at multiple servers. The idle-worker queue acts as a natural load balancer — workers on faster servers (GPU) finish sooner and pick up proportionally more tasks.
+
+```js
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'grpc',               // or 'socket'
+  dtype: 'fp16',              // uniform across all servers
+  servers: [
+    { address: 'localhost:50051', workers: 6, device: 'cuda', provider: 'cuda' },
+    { address: 'localhost:50052', workers: 6, device: 'cuda', provider: 'cuda' },
+    { address: 'localhost:50053', workers: 2, device: 'cpu' },
+  ],
+  autoStartServer: true,
+});
+// 14 workers total; GPU servers receive ~5× more requests than the CPU server
+```
+
+Note that `autoStartServer: true` means that it will create those servers and then send worker clients to them. These three servers are all local and tied to this process.
 
 ---
 
 ## Model management
 
+### Model compatibility (ONNX)
+
+Embedeer runs models via `onnxruntime-node`. Models chosen from Hugging Face must provide an ONNX export compatible with ONNX Runtime, or be convertible to ONNX (see [Optimum](https://github.com/huggingface/optimum-onnx)).
+
+### Pulling/pre-caching models
+
 Embedeer supports pre-caching and managing downloaded models.
 
-- Pull (pre-cache) a model via the CLI:
-
-```bash
-npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2
-```
-
-- Programmatic pre-cache using `loadModel()`:
-
-```js
-import { loadModel } from '@jsilvanus/embedeer';
-
-const { modelName, cacheDir } = await loadModel('Xenova/all-MiniLM-L6-v2', {
-  token: 'hf_...',    // optional HF token
-  dtype: 'q8',        // optional quantization
-  cacheDir: '/my/cache', // optional override
-});
-```
-
+- Pull (pre-cache) a model via the CLI: `npx @jsilvanus/embedeer --model Xenova/all-MiniLM-L6-v2`
+- Programmatic pre-cache using `loadModel()`
 - Cache location: default is `~/.embedeer/models`. Override with the CLI `--cache-dir` option or the `cacheDir` argument to `loadModel()`.
 
 ### Local models
 
-Embedeer can load models directly from local directories or copy a local model into the embedeer cache for reuse.
+- Use a local model path directly (no copying): `npx @jsilvanus/embedeer --use-local /path/to/local-model --data "Hello world"`
+- Copy a local model into the cache and give it a stable name: `npx @jsilvanus/embedeer --load-local /path/to/local-model --name my-local-model`
+- Use local modal after copying: `npx @jsilvanus/embedeer --model my-local-model` or `npx @jsilvanus/embedeer --model ~/.embedeer/models/my-local-model`
 
-- Use a local model path directly (no copying)
+### Programmatic helpers
 
-```bash
-npx @jsilvanus/embedeer --use-local /path/to/local-model --data "Hello world"
-```
-
-- Copy a local model into the cache and give it a stable name:
-
-```bash
-npx @jsilvanus/embedeer --load-local /path/to/local-model --name my-local-model
-```
-
-- How to use a local models?
-
-```bash
-npx @jsilvanus/embedeer --model my-local-model
-# or
-npx @jsilvanus/embedeer --model ~/.embedeer/models/my-local-model
-```
-
-### Model compatibility (ONNX)
-
-Embedeer runs models via `onnxruntime-node`. Models chosen from Hugging Face must provide an ONNX export compatible with ONNX Runtime, or be convertible to ONNX (see [Optimum](https://github.com/huggingface/optimum-onnx)). If a model does not include an ONNX build, export it and place the ONNX files in your cache or publish them to the model repository so `embedeer` can load them.
-
-### Programmatic runtime & cache helpers
-
-Two small runtime/cache helpers are available from the public API:
-
-- `getLoadedModels()` — returns an array of model names currently loaded by active worker pools.
-- `deleteModel(modelName, { cacheDir? })` — remove cached model directories matching `modelName`.
-
-Example:
-
-```js
-import { getLoadedModels, deleteModel } from '@jsilvanus/embedeer';
-
-// Synchronous list of models currently loaded by any running WorkerPool
-console.log(getLoadedModels()); // e.g. ['Xenova/all-MiniLM-L6-v2']
-
-// Remove a cached model from disk (async)
-const removed = await deleteModel('Xenova/all-MiniLM-L6-v2');
-console.log('removed?', removed);
-```
-
-### Programmatic local models
-
-```js
-import { importLocalModel, Embedder } from '@jsilvanus/embedeer';
-
-// Load directly from a local directory (no copy)
-const embedder = await Embedder.create('/path/to/local-model', { cacheDir: '/my/cache' });
-const vecs = await embedder.embed(['hello world']);
-await embedder.destroy();
-
-// Copy into cache as 'my-local-model'
-const { modelName, path } = await importLocalModel('/path/to/local-model', { name: 'my-local-model' });
-console.log('cached at', path);
-
-// Use the cached name like any other model
-const e = await Embedder.create(modelName);
-await e.destroy();
-```
-
-Helpful programmatic helpers:
+Some helpers are available to the public API:
 
 - `importLocalModel(src, { name?, cacheDir? })` — copy a local model into the cache and return `{ modelName, path }`.
+- `await Embedder.create('/path/to/local-model', { cacheDir: '/my/cache' });` — use a model from a custom path
 - `getCacheDir()` — return the resolved cache directory used by embedeer (useful when you want to manage files yourself).
 - `isModelDownloaded(name)` / `listModels()` / `getCachedModels()` — inspect the cache.
 - `deleteModel(name)` — remove a cached model directory.
+- `getLoadedModels()` — returns an array of model names currently loaded by active worker pools.
+- `deleteModel(modelName, { cacheDir? })` — remove cached model directories matching `modelName`.
 
 These functions are exported from the public package entry (`src/index.js`) so you can import them from `@jsilvanus/embedeer`.
 
@@ -250,25 +266,6 @@ GPU support is built into `onnxruntime-node` (a dependency of `@huggingface/tran
 
 ### Provider selection logic
 
----
-
-## Testing
-
-Run the project's tests locally:
-
-```bash
-# install deps
-pnpm install
-
-# run tests
-pnpm test
-
-# run tests with coverage
-pnpm run coverage
-```
-
-CI is enabled via GitHub Actions (`.github/workflows/ci.yml`) which runs tests and collects coverage on push and pull requests.
-
 | `device` | `provider` | Behavior |
 |----------|-----------|----------|
 | `cpu` (default) | — | Always CPU |
@@ -283,7 +280,15 @@ On Windows x64: GPU order is `cuda → dml`.
 
 ---
 
+## Testing
+
+CI is enabled via GitHub Actions (`.github/workflows/ci.yml`) which runs tests and collects coverage on push and pull requests.
+
+---
+
 ## Performance Optimizations
+
+### How to tune performance?
 
 Embedeer exposes runtime knobs and helper scripts to tune throughput for your host.
 
@@ -294,6 +299,11 @@ Embedeer exposes runtime knobs and helper scripts to tune throughput for your ho
   - GPU: larger batches (64–256) with low concurrency (1–2) are typically fastest.
 - BLAS threading: avoid oversubscription by setting `OMP_NUM_THREADS` and `MKL_NUM_THREADS` to `Math.floor(cpu_cores / concurrency)` before starting workers.
 - Device/provider: use `cuda` on Linux and `dml` (DirectML) on Windows when available; `device: 'auto'` will try providers and fall back to CPU.
+
+
+
+### Automatic performance tuning
+
 - Automatic tuning: use `bench/grid-search.js` to sweep `batchSize`, `concurrency`, and `dtype` for your host and save results. You can generate and persist a per-user profile and apply it automatically via the `Embedder` APIs.
 
 Examples:
@@ -306,11 +316,9 @@ node bench/grid-search.js --device cpu --sample-size 200 --out bench/grid-result
 node bench/grid-search.js --device gpu --sample-size 100 --out bench/grid-results-gpu.json
 ```
 
-### Programmatic profile generation (optional)
+### Programmatic performance tuning
 
-You can generate and save a per-user performance profile which `Embedder.create()` will
-automatically apply. This is useful to pick the best `batchSize` / `concurrency` for your
-machine without manual tuning.
+You can generate and save a per-user performance profile which `Embedder.create()` will automatically apply. This is useful to pick the best `batchSize` / `concurrency` for your machine without manual tuning.
 
 ```js
 import { Embedder } from '@jsilvanus/embedeer';
@@ -320,17 +328,30 @@ await Embedder.generateAndSaveProfile({ mode: 'quick', device: 'cpu', sampleSize
 // Subsequent calls to Embedder.create() will auto-apply the saved profile by default.
 ```
 
+### Server mode benchmark
+
+Compare socket and gRPC server throughput against the process/thread baseline:
+
+```bash
+npm run server-bench
+# or with options:
+node bench/server-bench.js --model Xenova/all-MiniLM-L6-v2 --batch-size 32 --sample-size 500
+```
+
+The benchmark starts each server as a subprocess, waits for it to load the model, runs embeddings, then shuts it down. Reports startup time (spawn → ready) separately from embedding throughput so you can see the fixed cost of model loading vs. steady-state performance.
+
+```
+Options:
+  --model       <name>   HF model identifier  (default: Xenova/all-MiniLM-L6-v2)
+  --batch-size  <n>      Texts per request     (default: 32)
+  --dtype       <type>   Quantization dtype    (default: none)
+  --sample-size <n>      Number of texts       (default: 200)
+  --skip-socket          Skip socket runner
+  --skip-grpc            Skip gRPC runner
+  --skip-baseline        Skip process/thread baseline
+```
+
 ---
-
-## E2E-testing
-
-Note: HF authentication has not been tested.
-
----
-
-## Collaboration
-
-You are welcome to suggest additions or open a PR, especially if you have performance-related assistance. Opened issues are also accepted with thanks.
 
 ## License
 
