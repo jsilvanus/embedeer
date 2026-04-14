@@ -2,15 +2,32 @@
 
 ## Overview
 
-A new optional `mode: 'socket'` that runs **one model server process** shared
-by N lightweight client workers. Unlike `'process'` and `'thread'` modes where
-each worker loads its own model copy, socket mode loads the model once and
-serves all client connections through a single process.
+A new optional `mode: 'socket'` that runs a **persistent model server daemon**
+shared across multiple independent OS processes. This is the primary use case:
+a machine running several services (a web server, a background worker, a CLI
+tool) all connecting to one loaded model rather than each paying the memory and
+startup cost of loading it separately.
 
-The multi-server variant extends this further: multiple servers (e.g. two GPU +
-one CPU) are managed by the same `WorkerPool`. The existing idle-worker queue
-acts as a natural load balancer — workers on faster servers become idle sooner
-and pick up proportionally more tasks.
+```
+OS Process A (web server)          ┐
+  └─ Embedder (mode:'socket') ─────┤
+                                   ├── /tmp/emb.sock ──► socket-model-server.js
+OS Process B (background worker)   │                     (one model in memory)
+  └─ Embedder (mode:'socket') ─────┘
+```
+
+`mode: 'process'` with `concurrency: 1` already gives you a single model copy
+and serial execution within one process — socket mode adds nothing there.
+The distinction is cross-process sharing: any number of independent OS processes
+can connect to the same server using only the socket path.
+
+Two secondary benefits:
+- **Server outlives the client** — the model stays loaded between
+  `Embedder.create()` / `destroy()` cycles; subsequent clients connect
+  instantly with no reload.
+- **Multi-server load balancing** — multiple servers (e.g. two GPU + one CPU)
+  managed by the same `WorkerPool`, with the idle-worker queue acting as a
+  natural load balancer.
 
 This is purely additive — no existing files change their public API.
 
@@ -202,8 +219,8 @@ No dedicated LB process or extra routing logic is needed. The existing
 - The CPU server acts as automatic overflow when all GPU workers are busy.
 
 A dedicated LB process only becomes worthwhile when you need capabilities
-outside this model: dynamic server registration, sticky routing, or sharing
-one pool across multiple `Embedder` instances in separate processes.
+outside this model: dynamic server registration, sticky routing, or health
+checking with automatic failover.
 
 ---
 
@@ -250,18 +267,51 @@ const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
 
 ---
 
-### `'socket'` — single server, auto-start
+### `'socket'` — shared daemon across multiple OS processes
 
-`WorkerPool` spawns one `SocketModelServer` process, waits for it to load the
-model, then opens `concurrency` socket connections to it. All connections
-share one model copy.
+The primary use case. Start the server once; any number of independent
+processes connect to it by socket path. One model copy serves them all.
+
+```bash
+# Start the daemon once (e.g. on machine boot / in a tmux pane)
+node src/socket-model-server.js \
+  --model Xenova/all-MiniLM-L6-v2 \
+  --socket /tmp/embedeer.sock \
+  --dtype fp16
+```
+
+```js
+// process-a.js — web server
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'socket',
+  socketPath: '/tmp/embedeer.sock',
+  autoStartServer: false,
+});
+
+// process-b.js — background worker (separate OS process, same machine)
+const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'socket',
+  socketPath: '/tmp/embedeer.sock',
+  autoStartServer: false,
+});
+```
+
+Both processes share the one loaded model. `embed()` is identical in both.
+
+---
+
+### `'socket'` — single owner, auto-start
+
+One process owns and manages the server. `WorkerPool` spawns it on
+`initialize()` and kills it on `destroy()`. Simpler than a separate daemon
+but does not survive `embedder.destroy()`.
 
 ```js
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
   mode: 'socket',
-  concurrency: 4,           // 4 connections, 1 model copy
+  concurrency: 4,
   socketPath: '/tmp/embedeer-main.sock',  // omit to auto-generate
-  autoStartServer: true,    // default
+  autoStartServer: true,                  // default
 });
 const vectors = await embedder.embed(['Hello world', 'Foo bar']);
 await embedder.destroy();   // kills server + closes connections
@@ -269,16 +319,28 @@ await embedder.destroy();   // kills server + closes connections
 
 ---
 
-### `'socket'` — single server, pre-running
+### `'socket'` — server outlives the client
 
-Connect to a server that was started outside this process (e.g. a shared
-daemon, or started manually for debugging).
+The server stays loaded between `Embedder` lifecycles — useful when the
+model is large and you want zero reload cost across multiple short-lived runs.
 
 ```js
-// Terminal 1 — start server manually:
-// node src/socket-model-server.js \
-//   --model Xenova/all-MiniLM-L6-v2 \
-//   --socket /tmp/embedeer-main.sock
+// First run — server starts, model loads
+const e1 = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'socket', socketPath: '/tmp/embedeer.sock', autoStartServer: true,
+});
+await e1.embed([...]);
+await e1.destroy();   // closes connections; server keeps running
+
+// Second run — connects instantly, no model reload
+const e2 = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
+  mode: 'socket', socketPath: '/tmp/embedeer.sock', autoStartServer: false,
+});
+```
+
+---
+
+### `'socket'` — legacy: single server, pre-running (manual start)
 
 // Terminal 2 — connect:
 const embedder = await Embedder.create('Xenova/all-MiniLM-L6-v2', {
