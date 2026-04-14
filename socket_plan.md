@@ -184,9 +184,16 @@ new SocketWorker(scriptPath, { workerData })
 ### `src/worker-pool.js`
 
 **Constructor — single-server shorthand:**
+
+`SocketWorker` is **not** imported at the top of `worker-pool.js`. The
+constructor only stores config; the actual `import('./socket-worker.js')`
+happens in `initialize()`. This means the `net` module is never loaded for
+users who only use `'process'` or `'thread'` mode.
+
 ```js
 } else if (mode === 'socket') {
-  this._WorkerClass = SocketWorker;
+  // _WorkerClass intentionally left null — lazy-loaded in initialize().
+  this._WorkerClass = null;
   this._workerScript = null;
   // Normalise to the servers array format used internally.
   // dtype/pooling/normalize are top-level — they must be uniform across all
@@ -198,6 +205,22 @@ new SocketWorker(scriptPath, { workerData })
     provider:   options.provider,
   }];
   this._autoStartServer = options.autoStartServer ?? true;
+}
+```
+
+**`initialize()` — lazy-load then start servers:**
+```js
+async initialize() {
+  if (this._initialized) return;
+
+  // Lazy-load: import only when mode:'socket' is actually used.
+  if (this.mode === 'socket' && !this._WorkerClass) {
+    const { SocketWorker } = await import('./socket-worker.js');
+    this._WorkerClass = SocketWorker;
+  }
+
+  await this._startServers();
+  // ... rest of initialize
 }
 ```
 

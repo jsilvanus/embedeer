@@ -2,13 +2,19 @@
  * WorkerPool manages a fixed-size pool of persistent workers.
  * Each worker loads the model once and reuses it across many batches.
  *
- * Two execution modes are supported:
+ * Execution modes:
  *   'process' (default) — each worker is an isolated OS child process
  *      (fork). A crash rejects only the in-flight task; the pool and the
  *      calling program continue unaffected.
  *   'thread' — each worker is a worker_threads thread in the same process.
  *      Lower memory overhead and startup time, but a thread crash can
  *      propagate to the parent. Use for trusted environments.
+ *   'socket' — workers are lightweight socket connections to a shared
+ *      SocketModelServer process. Worker class is lazy-loaded on first
+ *      initialize() call so the 'net' module is not imported unnecessarily.
+ *   'grpc'   — workers are gRPC stubs connecting to a GrpcModelServer.
+ *      Worker class and @grpc/grpc-js are lazy-loaded on first initialize()
+ *      so users who never use gRPC pay zero import cost.
  *
  * Concurrency 1 produces sequential (single-worker) execution.
  */
@@ -65,12 +71,18 @@ export class WorkerPool {
     this.provider = provider;
 
     // Pick defaults based on mode; can be overridden for testing.
+    // 'socket' and 'grpc' worker classes are NOT imported here — they are
+    // lazy-loaded in initialize() so that @grpc/grpc-js and socket deps are
+    // never loaded for users who only use 'process' or 'thread' mode.
     if (_WorkerClass) {
       this._WorkerClass = _WorkerClass;
       this._workerScript = workerScript ?? PROCESS_WORKER_PATH; // tests may override
     } else if (mode === 'thread') {
       this._WorkerClass = ThreadWorker;
       this._workerScript = threadWorkerScript ?? THREAD_WORKER_PATH;
+    } else if (mode === 'socket' || mode === 'grpc') {
+      // Deferred — resolved in initialize() via dynamic import.
+      this._WorkerClass = null;
     } else {
       this._WorkerClass = ChildProcessWorker;
       this._workerScript = workerScript ?? PROCESS_WORKER_PATH;
@@ -101,6 +113,17 @@ export class WorkerPool {
    */
   async initialize() {
     if (this._initialized) return;
+
+    // Lazy-load worker class for server modes. Dynamic import means
+    // @grpc/grpc-js is never touched unless mode:'grpc' is actually used.
+    if (this.mode === 'socket' && !this._WorkerClass) {
+      const { SocketWorker } = await import('./socket-worker.js');
+      this._WorkerClass = SocketWorker;
+    } else if (this.mode === 'grpc' && !this._WorkerClass) {
+      const { GrpcWorker } = await import('./grpc-worker.js');
+      this._WorkerClass = GrpcWorker;
+    }
+
     console.error(`Starting ${this.poolSize} worker(s); loading model: ${this.modelName} (may download)`);
 
     const readyPromises = [];

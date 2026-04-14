@@ -268,9 +268,17 @@ terminate() { grpc.closeClient(this._stub); return Promise.resolve(); }
 ### `src/worker-pool.js`
 
 **Constructor — `mode: 'grpc'` branch:**
+
+`GrpcWorker` is **not** imported at the top of `worker-pool.js`. The
+constructor only stores config; the actual `import('./grpc-worker.js')`
+happens in `initialize()`. This means `@grpc/grpc-js` and
+`@grpc/proto-loader` are never loaded for users who only use `'process'`
+or `'thread'` mode.
+
 ```js
 } else if (mode === 'grpc') {
-  this._WorkerClass = GrpcWorker;
+  // _WorkerClass intentionally left null — lazy-loaded in initialize().
+  this._WorkerClass = null;
   this._workerScript = null;
   // Normalise single-server shorthand to the internal servers array.
   // dtype/pooling/normalize are top-level — they must be uniform across all
@@ -283,6 +291,22 @@ terminate() { grpc.closeClient(this._stub); return Promise.resolve(); }
   }];
   this._grpcLoadBalancing = options.grpcLoadBalancing ?? null;
   this._autoStartServer   = options.autoStartServer ?? true;
+}
+```
+
+**`initialize()` — lazy-load then start servers:**
+```js
+async initialize() {
+  if (this._initialized) return;
+
+  // Lazy-load: @grpc/grpc-js is only imported when mode:'grpc' is used.
+  if (this.mode === 'grpc' && !this._WorkerClass) {
+    const { GrpcWorker } = await import('./grpc-worker.js');
+    this._WorkerClass = GrpcWorker;
+  }
+
+  await this._startServers();
+  // ... rest of initialize
 }
 ```
 
