@@ -120,8 +120,18 @@ export class WorkerPool {
       const { SocketWorker } = await import('./socket-worker.js');
       this._WorkerClass = SocketWorker;
     } else if (this.mode === 'grpc' && !this._WorkerClass) {
-      const { GrpcWorker } = await import('./grpc-worker.js');
-      this._WorkerClass = GrpcWorker;
+      try {
+        const { GrpcWorker } = await import('./grpc-worker.js');
+        this._WorkerClass = GrpcWorker;
+      } catch (err) {
+        if (err.code === 'ERR_MODULE_NOT_FOUND' && err.message.includes('grpc')) {
+          throw new Error(
+            'mode:\'grpc\' requires optional peer packages that are not installed.\n' +
+            'Install them with: npm install @grpc/grpc-js @grpc/proto-loader',
+          );
+        }
+        throw err;
+      }
     }
 
     console.error(`Starting ${this.poolSize} worker(s); loading model: ${this.modelName} (may download)`);
