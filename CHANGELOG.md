@@ -1,5 +1,11 @@
 # @jsilvanus/embedeer
 
+## 1.7.3
+
+### Patch Changes
+
+- 76e105b: Adding NPM_CONFIG_PROVENANCE
+
 ## 1.7.2
 
 ### Patch Changes
