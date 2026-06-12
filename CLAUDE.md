@@ -76,3 +76,20 @@ embed(texts)
 - Uses Node.js built-in test runner (`node --test`), no external test framework
 - `@grpc/grpc-js` and `@grpc/proto-loader` are **optional** dependencies — lazy-loaded only when gRPC mode is used
 - ESLint config in `eslint.config.cjs`; no lint script in package.json, run manually with `npx eslint`
+
+## Package & Publishing
+
+- **Package manager:** npm (`package-lock.json`)
+- **Registry:** npm public (`publishConfig.access: "public"`, with npm provenance enabled)
+
+### Releases (Changesets)
+
+Versioning, changelog, and publishing are automated via [Changesets](https://github.com/changesets/changesets) and `.github/workflows/release.yml`:
+
+1. When making a user-facing change, run `npx changeset` and describe the change (patch/minor/major). Commit the generated `.changeset/*.md` file with your PR.
+   - **Agent convention:** when an agent opens a PR with a user-facing change, it should create the changeset file itself (writing `.changeset/*.md` directly with an appropriate bump type and summary, rather than running the interactive `npx changeset` command) and include it in the PR, then explicitly tell the user it added a changeset and what bump type it chose.
+2. On merge to `main`, the release workflow installs deps and runs `npm run test`. If they pass and there are pending changesets, it opens/updates a "Version Packages" PR that bumps `package.json`, updates `CHANGELOG.md`, and consumes the changeset files.
+3. Merging the "Version Packages" PR triggers the release workflow again; with no pending changesets and a version bump present, it runs `npx changeset publish` to publish to npm.
+4. Publishing uses npm's OIDC **Trusted Publishing** — no `NPM_TOKEN` secret is stored. The npm package must have this repo's `release.yml` workflow registered as a Trusted Publisher (npmjs.com → package → Settings → Trusted Publisher).
+
+**Do not run `npm version` or manually edit the `version` field in `package.json`.** Do not run `npm publish` locally either. All versioning and publishing is handled by Changesets and the release workflow as described above — the only manual step for a contributor is `npx changeset`.
